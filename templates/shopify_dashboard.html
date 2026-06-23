@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SellerShield — Shopify Dashboard</title>
+  <script src="https://unpkg.com/@shopify/app-bridge@3" crossorigin="anonymous"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #F6F6F7; color: #202223; min-height: 100vh; padding: 24px;
+    }
+    .header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+    }
+    .logo { font-size: 1.5rem; font-weight: 800; color: #111; }
+    .logo span { color: #22C55E; }
+    .badge {
+      background: #22C55E; color: #fff; font-size: .7rem; font-weight: 700;
+      padding: 3px 8px; border-radius: 99px; text-transform: uppercase;
+    }
+    .card {
+      background: #fff; border-radius: 12px; padding: 28px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px;
+    }
+    .card h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 12px; color: #111; }
+    .card p { color: #6B7280; line-height: 1.6; margin-bottom: 8px; }
+    .score-row { display: flex; align-items: center; gap: 16px; margin: 16px 0; }
+    .score-circle {
+      width: 80px; height: 80px; border-radius: 50%;
+      background: conic-gradient(#22C55E 0% 0%, #E5E7EB 0% 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; font-weight: 800; color: #111;
+      border: 4px solid #22C55E; flex-shrink: 0;
+    }
+    .audit-url { font-size: .85rem; color: #6B7280; margin-bottom: 4px; }
+    .btn {
+      display: inline-block; background: #111; color: #fff; padding: 10px 20px;
+      border-radius: 8px; font-weight: 600; font-size: .9rem; border: none;
+      cursor: pointer; text-decoration: none; margin-top: 8px;
+    }
+    .btn:hover { background: #333; }
+    .btn-green { background: #22C55E; }
+    .btn-green:hover { background: #16A34A; }
+    .platform-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;
+      margin-top: 12px;
+    }
+    .platform-card {
+      border: 1px solid #E5E7EB; border-radius: 8px; padding: 14px;
+    }
+    .platform-name { font-weight: 600; font-size: .85rem; margin-bottom: 4px; }
+    .platform-score { font-size: 1.1rem; font-weight: 800; color: #22C55E; }
+    .platform-score.warn { color: #F59E0B; }
+    .platform-score.danger { color: #EF4444; }
+    .steps { counter-reset: steps; }
+    .step {
+      display: flex; gap: 12px; margin-bottom: 16px;
+      padding-bottom: 16px; border-bottom: 1px solid #F3F4F6;
+    }
+    .step:last-child { border-bottom: none; margin-bottom: 0; }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%; background: #111;
+      color: #fff; font-weight: 700; font-size: .8rem; display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px;
+    }
+    .step-content h3 { font-size: .95rem; font-weight: 600; margin-bottom: 4px; }
+    .step-content p { font-size: .85rem; color: #6B7280; }
+    #audit-form { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    #audit-url-input {
+      flex: 1; min-width: 200px; padding: 10px 14px; border: 1px solid #D1D5DB;
+      border-radius: 8px; font-size: .9rem;
+    }
+    #audit-status { margin-top: 12px; color: #6B7280; font-size: .9rem; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">Seller<span>Shield</span></div>
+  <span class="badge">Shopify App</span>
+</div>
+
+<div class="card">
+  <h2>Run a Compliance Audit</h2>
+  <p>Enter your store URL to scan it against Amazon, Google, Meta, TikTok, and Walmart marketplace rules.</p>
+  <div id="audit-form">
+    <input id="audit-url-input" type="url" placeholder="https://yourstore.com" value="https://{{ shop }}">
+    <button class="btn btn-green" onclick="runAudit()">Run Audit →</button>
+  </div>
+  <div id="audit-status"></div>
+</div>
+
+<div id="results-card" style="display:none;" class="card">
+  <h2>Audit Results</h2>
+  <div class="score-row">
+    <div class="score-circle" id="score-circle">—</div>
+    <div>
+      <div class="audit-url" id="result-url"></div>
+      <div style="font-size:1.2rem;font-weight:800;" id="result-grade"></div>
+      <div style="font-size:.85rem;color:#6B7280;" id="result-summary"></div>
+    </div>
+  </div>
+  <div class="platform-grid" id="platform-grid"></div>
+</div>
+
+<div class="card">
+  <h2>How It Works</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <h3>Enter your store URL</h3>
+        <p>We'll crawl your public-facing pages and check them against real marketplace policy rules.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <h3>Get your compliance score</h3>
+        <p>See your overall score, platform-by-platform breakdown, and which issues need fixing.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <h3>Get the full PDF fix guide</h3>
+        <p>The paid PDF report ($49) gives you step-by-step fix instructions for every finding.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function runAudit() {
+  const url = document.getElementById('audit-url-input').value.trim();
+  if (!url) return;
+  const status = document.getElementById('audit-status');
+  document.getElementById('results-card').style.display = 'none';
+  status.textContent = 'Scanning... this takes 15–30 seconds.';
+
+  try {
+    const resp = await fetch('{{ app_url }}/audit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, platforms: 'google,amazon,tiktok,meta,walmart'})
+    });
+    const data = await resp.json();
+    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
+
+    status.textContent = '';
+    const score = data.overall_score || 0;
+    const circle = document.getElementById('score-circle');
+    circle.textContent = score;
+    const pct = score + '%';
+    const color = score >= 75 ? '#22C55E' : score >= 50 ? '#F59E0B' : '#EF4444';
+    circle.style.background = 'conic-gradient(' + color + ' 0% ' + pct + ', #E5E7EB ' + pct + ' 100%)';
+    circle.style.borderColor = color;
+
+    document.getElementById('result-url').textContent = data.url;
+    document.getElementById('result-grade').textContent = 'Grade: ' + (data.overall_grade || '—');
+    document.getElementById('result-summary').textContent =
+      (data.suspension_count || 0) + ' suspension risks · ' +
+      (data.all_findings?.length || 0) + ' total issues';
+
+    const grid = document.getElementById('platform-grid');
+    grid.innerHTML = '';
+    (data.platforms || []).forEach(p => {
+      const cls = p.score >= 75 ? '' : p.score >= 50 ? 'warn' : 'danger';
+      grid.innerHTML += '<div class="platform-card"><div class="platform-name">' + p.name + '</div>' +
+        '<div class="platform-score ' + cls + '">' + p.score + '</div></div>';
+    });
+
+    document.getElementById('results-card').style.display = 'block';
+  } catch(e) {
+    status.textContent = 'Request failed. Please try again.';
+  }
+}
+</script>
+
+</body>
+</html>
