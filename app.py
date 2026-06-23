@@ -17,7 +17,7 @@ import hashlib
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, send_file, abort, redirect as flask_redirect
+from flask import Flask, render_template, request, jsonify, send_file, abort, redirect as flask_redirect, make_response
 import requests as http_req
 
 # Add engine directory to path
@@ -28,7 +28,7 @@ from report_generator import generate_pdf
 
 app = Flask(__name__)
 
-# In-memory audit cache (results live for 2 hours)
+# ââ In-memory audit cache (results live for 2 hours) ââââââââââââââââââââââ
 _cache = {}
 _cache_lock = threading.Lock()
 
@@ -45,7 +45,7 @@ PLATFORM_LABELS = {
     "walmart": "Walmart Marketplace",
 }
 
-# Shopify App Config
+# ââ Shopify App Config âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY", "")
 SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET", "")
 APP_URL            = os.environ.get("APP_URL", "https://getsellershield.app")
@@ -55,9 +55,11 @@ SHOPIFY_SCOPES = (
     "read_customers,read_script_tags,write_script_tags"
 )
 
+# In-memory token store â lost on restart; shop re-auths automatically
 _shop_tokens: dict = {}
 
 CONTACT_EMAIL = "jonrcarter22@gmail.com"
+
 
 def _verify_shopify_hmac(params: dict) -> bool:
     params = dict(params)
@@ -67,6 +69,7 @@ def _verify_shopify_hmac(params: dict) -> bool:
         SHOPIFY_API_SECRET.encode(), sorted_params.encode(), hashlib.sha256
     ).hexdigest()
     return hmac_lib.compare_digest(expected, hmac_value)
+
 
 def _clean_cache():
     now = datetime.utcnow()
@@ -78,6 +81,7 @@ def _clean_cache():
             except Exception:
                 pass
             del _cache[k]
+
 
 def _result_to_dict(result, audit_id: str) -> dict:
     platforms = []
@@ -113,14 +117,18 @@ def _result_to_dict(result, audit_id: str) -> dict:
         "crawl_error": result.crawl_error, "gumroad_url": GUMROAD_URL,
     }
 
-# Web Audit Routes
+
+# ââ Web Audit Routes âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.route("/")
 def index():
     shop = request.args.get("shop", "")
+    host = request.args.get("host", "")
     if shop:
-        return flask_redirect(f"/shopify/dashboard?shop={shop}")
+        # Entry point from Shopify admin â forward to embedded dashboard
+        return flask_redirect(f"/shopify/dashboard?shop={shop}&host={host}")
     return render_template("index.html", gumroad_url=GUMROAD_URL)
+
 
 @app.route("/audit", methods=["POST"])
 def run_audit():
@@ -153,6 +161,7 @@ def run_audit():
         }
     return jsonify(_cache[audit_id]["result_dict"])
 
+
 @app.route("/report/<audit_id>/pdf")
 def download_pdf(audit_id):
     _clean_cache()
@@ -166,7 +175,8 @@ def download_pdf(audit_id):
     filename = f"SellerShield_Report_{entry['result'].url.replace('https://', '').replace('/', '_')}.pdf"
     return send_file(pdf_path, as_attachment=True, download_name=filename)
 
-# Shopify OAuth Routes
+
+# ââ Shopify OAuth Routes âââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.route("/shopify/install")
 def shopify_install():
@@ -180,6 +190,7 @@ def shopify_install():
         f"&redirect_uri={APP_URL}/auth/callback"
     )
     return flask_redirect(auth_url)
+
 
 @app.route("/auth/callback")
 def shopify_callback():
@@ -215,8 +226,9 @@ def shopify_callback():
             ).get("confirmation_url", "")
             if confirmation_url:
                 return flask_redirect(confirmation_url)
-    # Redirect directly to dashboard to avoid OAuth loop
-    return flask_redirect(f"{APP_URL}/shopify/dashboard?shop={shop}")
+    # Send back to Shopify admin â Shopify re-embeds our app URL in the iframe
+    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
+
 
 @app.route("/billing/callback")
 def billing_callback():
@@ -231,47 +243,67 @@ def billing_callback():
         json={"recurring_application_charge": {"id": charge_id}},
         timeout=10,
     )
-    return flask_redirect(f"{APP_URL}/shopify/dashboard?shop={shop}")
+    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
+
 
 @app.route("/shopify/dashboard")
 def shopify_dashboard():
     shop = request.args.get("shop", "").strip()
     if not shop:
         return "Missing shop parameter", 400
-    token = _shop_tokens.get(shop, "")
     host = request.args.get("host", "")
+    token = _shop_tokens.get(shop, "")
     if not token:
+        # No token â use App Bridge to escape the Shopify iframe and trigger OAuth
         install_url = f"{APP_URL}/shopify/install?shop={shop}"
-        # Use App Bridge postMessage to escape Shopify iframe properly
-        return f"""<!DOCTYPE html>
+        # Compute a default host if not provided
+        default_host = f"admin.shopify.com/store/{shop.replace('.myshopify.com', '')}"
+        html = f"""<!DOCTYPE html>
 <html><head>
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 <script>
 (function() {{
     var shop = "{shop}";
-    var host = "{host}" || btoa("admin.shopify.com/store/" + shop.replace(".myshopify.com", ""));
+    var host = "{host}" || btoa("{default_host}");
     var installUrl = "{install_url}";
     try {{
         var AppBridge = window["app-bridge"];
-        var app = AppBridge.default({{ apiKey: "{SHOPIFY_API_KEY}", host: host }});
+        var createApp = AppBridge.default || AppBridge.createApp;
+        var app = createApp({{ apiKey: "{SHOPIFY_API_KEY}", host: host }});
         var Redirect = AppBridge.actions.Redirect;
         Redirect.create(app, {{ url: installUrl }});
+        Redirect.dispatch(app, Redirect.Action.REMOTE, installUrl);
     }} catch(e) {{
-        window.location.href = installUrl;
+        window.top.location.href = installUrl;
     }}
 }})();
 </script>
-</head><body>Authenticating...</body></html>"""
-    return render_template(
-        "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=True, host=host
+</head><body><p style="font-family:sans-serif;padding:20px;">Authenticating with SellerShield...</p></body></html>"""
+        resp = make_response(html)
+        resp.headers["Content-Security-Policy"] = (
+            "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+        )
+        return resp
+    resp = make_response(render_template(
+        "shopify_dashboard.html",
+        shop=shop,
+        host=host,
+        app_url=APP_URL,
+        api_key=SHOPIFY_API_KEY,
+        authenticated=True,
+    ))
+    resp.headers["Content-Security-Policy"] = (
+        "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
     )
+    return resp
 
-# Static Pages
+
+# ââ Static Pages âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 _PAGE_STYLE = """
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
        background: #0B1120; color: #CBD5E1; min-height: 100vh; }
 nav { display: flex; align-items: center; justify-content: space-between;
       padding: 18px 48px; border-bottom: 1px solid rgba(255,255,255,.08); }
@@ -297,13 +329,14 @@ def _nav():
     return f'<nav><a class="logo" href="/">Seller<span>Shield</span></a><a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></nav>'
 
 def _footer():
-    return f'<footer><p>SellerShield &nbsp; <a href="/privacy">Privacy Policy</a> &nbsp; <a href="/terms">Terms of Service</a> &nbsp; <a href="/about">About</a></p><p style="margin-top:8px;">Results are informational only. Always verify against official platform documentation.</p></footer>'
+    return f'<footer><p>SellerShield &nbsp;Â·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;Â·&nbsp; <a href="/terms">Terms of Service</a> &nbsp;Â·&nbsp; <a href="/about">About</a></p><p style="margin-top:8px;">Results are informational only. Always verify against official platform documentation.</p></footer>'
+
 
 @app.route("/privacy")
 def privacy():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Privacy Policy - SellerShield</title>{_PAGE_STYLE}</head>
+<title>Privacy Policy â SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
 <h1>Privacy Policy</h1>
@@ -315,25 +348,26 @@ def privacy():
 <li>Publicly accessible content from that URL</li>
 <li>Your selected marketplace platforms</li>
 </ul>
-<p>We do not collect personal identifiers unless you contact us directly.</p>
+<p>We do <strong>not</strong> collect personal identifiers unless you contact us directly.</p>
 <h2>How We Use Your Data</h2>
 <p>Audit results are held in temporary server memory for up to 2 hours, then permanently deleted.</p>
 <h2>Third-Party Services</h2>
 <ul>
-<li>Railway - cloud hosting provider.</li>
-<li>Gumroad - payment processor for PDF reports.</li>
-<li>Shopify - marketplace platform for the SellerShield app.</li>
+<li><strong>Railway</strong> â cloud hosting provider.</li>
+<li><strong>Gumroad</strong> â payment processor for PDF reports.</li>
+<li><strong>Shopify</strong> â marketplace platform for the SellerShield app.</li>
 </ul>
 <h2>Contact</h2>
 <p>For privacy questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
 </div>
 {_footer()}</body></html>"""
 
+
 @app.route("/terms")
 def terms():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Terms of Service - SellerShield</title>{_PAGE_STYLE}</head>
+<title>Terms of Service â SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
 <h1>Terms of Service</h1>
@@ -348,26 +382,28 @@ def terms():
 <h2>4. PDF Reports and Refunds</h2>
 <p>PDF reports are digital goods. All sales are final.</p>
 <h2>5. Limitation of Liability</h2>
-<p>SellerShield total liability is limited to the amount you paid (if any).</p>
+<p>SellerShield's total liability is limited to the amount you paid (if any).</p>
 <h2>6. Contact</h2>
 <p>Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
 </div>
 {_footer()}</body></html>"""
 
+
 @app.route("/about")
 def about():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>About - SellerShield</title>{_PAGE_STYLE}</head>
+<title>About â SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
 <h1>About SellerShield</h1>
 <p>SellerShield is a free marketplace compliance audit tool for e-commerce store owners.</p>
 <h2>Contact Us</h2>
 <p>Email: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
-<p style="margin-top: 40px;"><a href="/" style="color: #22C55E; font-weight: 700;">Run a Free Audit</a></p>
+<p style="margin-top: 40px;"><a href="/" style="color: #22C55E; font-weight: 700;">&#8592; Run a Free Audit</a></p>
 </div>
 {_footer()}</body></html>"""
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
