@@ -319,6 +319,30 @@
     .finding-msg { font-size: .9rem; color: var(--off-white); line-height: 1.4; }
     .finding-cat { font-size: .75rem; color: var(--gray); margin-top: 3px; }
 
+    /* Blurred / locked findings */
+    .finding-row.locked {
+      position: relative;
+      overflow: hidden;
+    }
+    .finding-row.locked .finding-msg,
+    .finding-row.locked .finding-cat {
+      filter: blur(4px);
+      user-select: none;
+      pointer-events: none;
+    }
+    .finding-row.locked .lock-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--light);
+      cursor: default;
+    }
+
     /* Paywall CTA */
     .paywall {
       background: linear-gradient(135deg, rgba(34,197,94,.08), rgba(59,130,246,.06));
@@ -597,7 +621,7 @@
         </div>`;
     });
 
-    // Findings — free tier shows all issue names, no fix details
+    // Findings — free tier shows first 2, rest are blurred
     const findings = [...data.all_findings].sort((a, b) =>
       (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9)
     );
@@ -606,9 +630,11 @@
     document.getElementById('findings-title').textContent =
       `${findings.length} Issue${findings.length !== 1 ? 's' : ''} Found`;
 
-    findings.forEach(f => {
+    const FREE_LIMIT = 2;
+    findings.forEach((f, i) => {
+      const locked = i >= FREE_LIMIT;
       fList.innerHTML += `
-        <div class="finding-row">
+        <div class="finding-row${locked ? ' locked' : ''}">
           <span class="sev-badge sev-${f.severity}">${f.severity}</span>
           <div>
             <div class="finding-msg">${f.message}</div>
@@ -616,6 +642,7 @@
               ? 'Fix details included in the full PDF report'
               : 'See full report for remediation steps'}</div>
           </div>
+          ${locked ? `<div class="lock-overlay">🔒 Unlock in full report</div>` : ''}
         </div>`;
     });
 
