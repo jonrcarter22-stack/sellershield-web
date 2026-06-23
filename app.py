@@ -239,14 +239,31 @@ def shopify_dashboard():
     if not shop:
         return "Missing shop parameter", 400
     token = _shop_tokens.get(shop, "")
+    host = request.args.get("host", "")
     if not token:
-        # No token — escape Shopify iframe for top-level OAuth redirect
-        install_url = f"/shopify/install?shop={shop}"
-        return f"""<!DOCTYPE html><html><head>
-<script>window.top.location.href = "{install_url}";</script>
-</head><body>Redirecting...</body></html>"""
+        install_url = f"{APP_URL}/shopify/install?shop={shop}"
+        # Use App Bridge postMessage to escape Shopify iframe properly
+        return f"""<!DOCTYPE html>
+<html><head>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<script>
+(function() {{
+    var shop = "{shop}";
+    var host = "{host}" || btoa("admin.shopify.com/store/" + shop.replace(".myshopify.com", ""));
+    var installUrl = "{install_url}";
+    try {{
+        var AppBridge = window["app-bridge"];
+        var app = AppBridge.default({{ apiKey: "{SHOPIFY_API_KEY}", host: host }});
+        var Redirect = AppBridge.actions.Redirect;
+        Redirect.create(app, {{ url: installUrl }});
+    }} catch(e) {{
+        window.location.href = installUrl;
+    }}
+}})();
+</script>
+</head><body>Authenticating...</body></html>"""
     return render_template(
-        "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=True
+        "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=True, host=host
     )
 
 # Static Pages
