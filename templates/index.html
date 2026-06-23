@@ -520,9 +520,9 @@
 
   // ── Show/hide sections ─────────────────────────────────────────────────────
   function showSection(name) {
-    document.getElementById('home-section').style.display = name === 'home' ? '' : 'none';
-    document.getElementById('loading').style.display      = name === 'loading' ? '' : 'none';
-    document.getElementById('results').style.display      = name === 'results' ? '' : 'none';
+    document.getElementById('home-section').style.display = name === 'home' ? 'block' : 'none';
+    document.getElementById('loading').style.display      = name === 'loading' ? 'block' : 'none';
+    document.getElementById('results').style.display      = name === 'results' ? 'block' : 'none';
   }
 
   // ── Grade color class ──────────────────────────────────────────────────────
