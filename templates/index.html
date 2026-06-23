@@ -291,10 +291,28 @@
       border-radius: 12px;
       padding: 18px 20px;
     }
+    .platform-card { position: relative; overflow: hidden; }
     .platform-card .p-name { font-size: .85rem; color: var(--light); margin-bottom: 6px; }
     .platform-card .p-score { font-size: 1.6rem; font-weight: 800; }
     .platform-card .p-grade { font-size: .8rem; font-weight: 600; margin-left: 4px; }
     .platform-card .p-issues { font-size: .8rem; color: var(--gray); margin-top: 4px; }
+    .platform-card .p-locked-body {
+      filter: blur(5px);
+      user-select: none;
+      pointer-events: none;
+    }
+    .platform-card .p-lock-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--light);
+      cursor: default;
+      letter-spacing: .02em;
+    }
 
     /* Findings list (free tier) */
     .findings-section { margin-bottom: 28px; }
@@ -625,12 +643,13 @@
       pGrid.innerHTML += `
         <div class="platform-card">
           <div class="p-name">${p.name}</div>
-          <div>
+          <div class="p-locked-body">
             <span class="p-score ${gradeClass(p.grade)}">${p.score}</span>
             <span style="color:var(--gray);font-size:.9rem">/100</span>
             <span class="p-grade ${gradeClass(p.grade)}">${p.grade}</span>
+            <div class="p-issues">${issueText}</div>
           </div>
-          <div class="p-issues">${issueText}</div>
+          <div class="p-lock-overlay">🔒 Unlock in full report</div>
         </div>`;
     });
 
@@ -643,7 +662,7 @@
     document.getElementById('findings-title').textContent =
       `${findings.length} Issue${findings.length !== 1 ? 's' : ''} Found`;
 
-    const FREE_LIMIT = 2;
+    const FREE_LIMIT = 0;
     findings.forEach((f, i) => {
       const locked = i >= FREE_LIMIT;
       fList.innerHTML += `
