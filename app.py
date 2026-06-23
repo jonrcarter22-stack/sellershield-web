@@ -240,8 +240,11 @@ def shopify_dashboard():
         return "Missing shop parameter", 400
     token = _shop_tokens.get(shop, "")
     if not token:
-        # No token after server restart - re-run OAuth seamlessly
-        return flask_redirect(f"/shopify/install?shop={shop}")
+        # No token — escape Shopify iframe for top-level OAuth redirect
+        install_url = f"/shopify/install?shop={shop}"
+        return f"""<!DOCTYPE html><html><head>
+<script>window.top.location.href = "{install_url}";</script>
+</head><body>Redirecting...</body></html>"""
     return render_template(
         "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=True
     )
