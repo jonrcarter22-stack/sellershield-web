@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SellerShield — Free Marketplace Compliance Audit</title>
+  <meta name="description" content="Free compliance audit for e-commerce stores. See exactly what could get your Amazon, Google, Meta, TikTok, or Walmart account flagged — in 30 seconds.">
+  <meta property="og:title" content="SellerShield — Free Marketplace Compliance Audit">
+  <meta property="og:description" content="Scan your store against real marketplace rules. Free score, platform breakdown, and top issues. Full fix guide for $49.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -420,7 +425,10 @@
 <!-- NAV -->
 <nav>
   <div class="logo">Seller<span>Shield</span></div>
-  <a href="mailto:contact@sellershield.com">contact@sellershield.com</a>
+  <div style="display:flex;gap:24px;align-items:center;">
+    <a href="/about" style="color:var(--light);font-size:.85rem;">About</a>
+    <a href="mailto:jonrcarter22@gmail.com" style="font-size:.85rem;">Contact</a>
+  </div>
 </nav>
 
 <!-- HERO + FORM (shown by default) -->
@@ -514,26 +522,31 @@
       <div class="paywall-feature"><span class="check">✓</span> Suspension risk warnings</div>
       <div class="paywall-feature"><span class="check">✓</span> Professional PDF you can share</div>
     </div>
+    <div style="margin-bottom:20px;">
+      <span style="font-size:2.2rem;font-weight:800;color:var(--green);">$49</span>
+      <span style="color:var(--gray);font-size:.85rem;margin-left:8px;">one-time · no subscription</span>
+    </div>
     <a class="btn-pay" id="gumroad-link" href="#" target="_blank">
-      Get My Full PDF Report
-      <span class="btn-pay-sub">Instant download after purchase</span>
+      Get My Full PDF Report →
+      <span class="btn-pay-sub">Instant download · Secure checkout via Gumroad</span>
     </a>
   </div>
 </div>
 
 <!-- FOOTER -->
 <footer>
-  <p>SellerShield &nbsp;·&nbsp; <a href="mailto:contact@sellershield.com">contact@sellershield.com</a> &nbsp;·&nbsp; sellershield.com</p>
+  <p>SellerShield &nbsp;·&nbsp; <a href="/about">About</a> &nbsp;·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms">Terms of Service</a> &nbsp;·&nbsp; <a href="mailto:jonrcarter22@gmail.com">Contact</a></p>
   <p style="margin-top:8px;">Results are informational only. Platform policies change — always verify against official documentation.</p>
 </footer>
 
 <script>
   // ── Platform pill toggles ──────────────────────────────────────────────────
+  // Use 'change' on the checkbox (not 'click' on the label) to avoid
+  // the double-toggle bug where clicking a <label> fires both the native
+  // checkbox toggle AND a custom click handler.
   document.querySelectorAll('.pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-      const cb = pill.querySelector('input');
-      cb.checked = !cb.checked;
-      pill.classList.toggle('active', cb.checked);
+    pill.querySelector('input').addEventListener('change', function() {
+      pill.classList.toggle('active', this.checked);
     });
   });
 
@@ -691,6 +704,8 @@
   });
   document.getElementById('btn-new-audit').addEventListener('click', () => {
     showSection('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => document.getElementById('url-input').focus(), 300);
   });
 </script>
 </body>
