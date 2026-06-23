@@ -1,7 +1,8 @@
 """
 SellerShield Web App
 --------------------
-Flask server that runs compliance audits and serves results via a web UI.
+Flask server that runs compliance audits, serves results via a web UI,
+and acts as a Shopify embedded app with OAuth + billing.
 
 Free tier:  score, grade, platform breakdown, issue names only
 Paid tier:  full fix details + PDF download (linked to Gumroad)
@@ -11,10 +12,13 @@ import os
 import sys
 import uuid
 import json
+import hmac as hmac_lib
+import hashlib
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, send_file, abort
+from flask import Flask, render_template, request, jsonify, send_file, abort, redirect as flask_redirect
+import requests as http_req
 
 # Add engine directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "engine"))
@@ -24,15 +28,13 @@ from report_generator import generate_pdf
 
 app = Flask(__name__)
 
-# ── In-memory audit cache (results live for 2 hours) ────────────────────────
-# Keyed by audit_id → {result, pdf_path, expires_at}
+# ── In-memory audit cache (results live for 2 hours) ──────────────────────
 _cache = {}
 _cache_lock = threading.Lock()
 
 REPORTS_DIR = Path(__file__).parent / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
-# Gumroad product link — update this once your Gumroad listing is live
 GUMROAD_URL = "https://carterverse838.gumroad.com/l/pcarai"
 
 PLATFORM_LABELS = {
@@ -43,14 +45,36 @@ PLATFORM_LABELS = {
     "walmart": "Walmart Marketplace",
 }
 
+# ── Shopify App Config ─────────────────────────────────────────────────────
+SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY", "")
+SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET", "")
+APP_URL            = os.environ.get("APP_URL", "https://getsellershield.app")
+SHOPIFY_BILLING_TEST = os.environ.get("SHOPIFY_BILLING_TEST", "true").lower() == "true"
+SHOPIFY_SCOPES = (
+    "read_products,write_products,read_orders,"
+    "read_customers,read_script_tags,write_script_tags"
+)
+
+_shop_tokens: dict = {}
+
+CONTACT_EMAIL = "jonrcarter22@gmail.com"
+
+
+def _verify_shopify_hmac(params: dict) -> bool:
+    params = dict(params)
+    hmac_value = params.pop("hmac", "")
+    sorted_params = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+    expected = hmac_lib.new(
+        SHOPIFY_API_SECRET.encode(), sorted_params.encode(), hashlib.sha256
+    ).hexdigest()
+    return hmac_lib.compare_digest(expected, hmac_value)
+
 
 def _clean_cache():
-    """Remove expired entries from cache."""
     now = datetime.utcnow()
     with _cache_lock:
         expired = [k for k, v in _cache.items() if v["expires_at"] < now]
         for k in expired:
-            # Clean up PDF file too
             try:
                 Path(_cache[k]["pdf_path"]).unlink(missing_ok=True)
             except Exception:
@@ -59,113 +83,84 @@ def _clean_cache():
 
 
 def _result_to_dict(result, audit_id: str) -> dict:
-    """Serialize AuditResult to a JSON-safe dict for the frontend."""
     platforms = []
     for ps in result.platform_scores:
         findings = []
         for f in ps.findings:
             findings.append({
-                "severity":  f.severity,
-                "category":  f.category,
-                "message":   f.message,
-                "fix":       f.fix,
-                "evidence":  f.evidence,
-                "rule_id":   f.rule_id,
+                "severity": f.severity, "category": f.category,
+                "message":  f.message,  "fix":      f.fix,
+                "evidence": f.evidence, "rule_id":  f.rule_id,
             })
         platforms.append({
-            "name":     ps.name,
-            "platform": ps.platform,
-            "score":    ps.score,
-            "grade":    ps.grade,
-            "passed":   ps.passed,
-            "failed":   ps.failed,
-            "findings": findings,
+            "name": ps.name, "platform": ps.platform,
+            "score": ps.score, "grade": ps.grade,
+            "passed": ps.passed, "failed": ps.failed, "findings": findings,
         })
-
-    # Deduplicate all_findings by rule_id for the summary list
     seen, unique_findings = set(), []
     for f in result.all_findings:
         if f.rule_id not in seen:
             seen.add(f.rule_id)
             unique_findings.append({
-                "severity": f.severity,
-                "message":  f.message,
-                "fix":      f.fix,
-                "rule_id":  f.rule_id,
+                "severity": f.severity, "message": f.message,
+                "fix": f.fix, "rule_id": f.rule_id,
             })
-
     return {
-        "audit_id":        audit_id,
-        "url":             result.url,
-        "timestamp":       result.timestamp[:19].replace("T", " "),
-        "overall_score":   result.overall_score,
-        "overall_grade":   result.overall_grade,
-        "ssl_ok":          result.ssl_ok,
-        "pages_found":     result.pages_found,
-        "pages_missing":   result.pages_missing,
-        "platforms":       platforms,
-        "all_findings":    unique_findings,
+        "audit_id": audit_id, "url": result.url,
+        "timestamp": result.timestamp[:19].replace("T", " "),
+        "overall_score": result.overall_score, "overall_grade": result.overall_grade,
+        "ssl_ok": result.ssl_ok, "pages_found": result.pages_found,
+        "pages_missing": result.pages_missing, "platforms": platforms,
+        "all_findings": unique_findings,
         "suspension_count": len(result.suspension_warnings),
-        "crawl_error":     result.crawl_error,
-        "gumroad_url":     GUMROAD_URL,
+        "crawl_error": result.crawl_error, "gumroad_url": GUMROAD_URL,
     }
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+# ── Web Audit Routes ───────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
+    shop = request.args.get("shop", "")
+    if shop:
+        return shopify_install()
     return render_template("index.html", gumroad_url=GUMROAD_URL)
 
 
 @app.route("/audit", methods=["POST"])
 def run_audit():
-    """Run an audit. Returns JSON with free-tier results."""
     _clean_cache()
-
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
     platforms_raw = (data.get("platforms") or "google,amazon,tiktok,meta,walmart").strip()
-
     if not url:
         return jsonify({"error": "Please enter a store URL."}), 400
-
     if not url.startswith("http"):
         url = "https://" + url
-
     platforms = [p.strip() for p in platforms_raw.split(",") if p.strip()]
     valid = {"google", "amazon", "tiktok", "meta", "walmart"}
     platforms = [p for p in platforms if p in valid] or list(valid)
-
     try:
         engine = AuditEngine(timeout=12)
         result = engine.audit(url, platforms)
     except Exception as e:
         return jsonify({"error": f"Audit failed: {str(e)}"}), 500
-
     audit_id = str(uuid.uuid4())[:8]
-
-    # Generate PDF in background and cache
     pdf_path = str(REPORTS_DIR / f"sellershield_{audit_id}.pdf")
     try:
         generate_pdf(result, pdf_path)
     except Exception:
         pdf_path = None
-
     with _cache_lock:
         _cache[audit_id] = {
-            "result":     result,
-            "result_dict": _result_to_dict(result, audit_id),
-            "pdf_path":   pdf_path,
-            "expires_at": datetime.utcnow() + timedelta(hours=2),
+            "result": result, "result_dict": _result_to_dict(result, audit_id),
+            "pdf_path": pdf_path, "expires_at": datetime.utcnow() + timedelta(hours=2),
         }
-
     return jsonify(_cache[audit_id]["result_dict"])
 
 
 @app.route("/report/<audit_id>/pdf")
 def download_pdf(audit_id):
-    """Serve the PDF report. In production, gate this behind Gumroad verification."""
     _clean_cache()
     with _cache_lock:
         entry = _cache.get(audit_id)
@@ -174,12 +169,89 @@ def download_pdf(audit_id):
     pdf_path = entry.get("pdf_path")
     if not pdf_path or not Path(pdf_path).exists():
         abort(404)
-
     filename = f"SellerShield_Report_{entry['result'].url.replace('https://', '').replace('/', '_')}.pdf"
     return send_file(pdf_path, as_attachment=True, download_name=filename)
 
 
-CONTACT_EMAIL = "jonrcarter22@gmail.com"
+# ── Shopify OAuth Routes ───────────────────────────────────────────────────
+
+@app.route("/shopify/install")
+def shopify_install():
+    shop = request.args.get("shop", "").strip()
+    if not shop:
+        return "Missing shop parameter", 400
+    auth_url = (
+        f"https://{shop}/admin/oauth/authorize"
+        f"?client_id={SHOPIFY_API_KEY}"
+        f"&scope={SHOPIFY_SCOPES}"
+        f"&redirect_uri={APP_URL}/auth/callback"
+    )
+    return flask_redirect(auth_url)
+
+
+@app.route("/auth/callback")
+def shopify_callback():
+    shop = request.args.get("shop", "")
+    code = request.args.get("code", "")
+    if not shop or not code:
+        return "Invalid OAuth callback", 400
+    if not _verify_shopify_hmac(request.args.to_dict()):
+        return "HMAC validation failed", 403
+    token_resp = http_req.post(
+        f"https://{shop}/admin/oauth/access_token",
+        json={"client_id": SHOPIFY_API_KEY, "client_secret": SHOPIFY_API_SECRET, "code": code},
+        timeout=10,
+    )
+    if token_resp.status_code != 200:
+        return f"Token exchange failed: {token_resp.text}", 500
+    access_token = token_resp.json().get("access_token", "")
+    _shop_tokens[shop] = access_token
+    if not SHOPIFY_BILLING_TEST:
+        charge_resp = http_req.post(
+            f"https://{shop}/admin/api/2024-01/recurring_application_charges.json",
+            headers={"X-Shopify-Access-Token": access_token},
+            json={"recurring_application_charge": {
+                "name": "SellerShield Monthly", "price": 29.99,
+                "return_url": f"{APP_URL}/billing/callback?shop={shop}",
+                "test": False, "trial_days": 7,
+            }},
+            timeout=10,
+        )
+        if charge_resp.status_code == 201:
+            confirmation_url = charge_resp.json().get(
+                "recurring_application_charge", {}
+            ).get("confirmation_url", "")
+            if confirmation_url:
+                return flask_redirect(confirmation_url)
+    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
+
+
+@app.route("/billing/callback")
+def billing_callback():
+    shop = request.args.get("shop", "")
+    charge_id = request.args.get("charge_id", "")
+    token = _shop_tokens.get(shop, "")
+    if not token:
+        return "Shop not authenticated", 403
+    http_req.post(
+        f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}/activate.json",
+        headers={"X-Shopify-Access-Token": token},
+        json={"recurring_application_charge": {"id": charge_id}},
+        timeout=10,
+    )
+    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
+
+
+@app.route("/shopify/dashboard")
+def shopify_dashboard():
+    shop = request.args.get("shop", "")
+    token = _shop_tokens.get(shop, "")
+    return render_template(
+        "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=bool(token)
+    )
+
+
+# ── Static Pages ───────────────────────────────────────────────────────────
 
 _PAGE_STYLE = """
 <style>
@@ -222,37 +294,22 @@ def privacy():
 <div class="page">
   <h1>Privacy Policy</h1>
   <p class="meta">Last updated: June 2025</p>
-
-  <p>SellerShield ("we", "us", or "our") operates this compliance audit tool. This page explains what information we collect when you use our service and how we handle it.</p>
-
+  <p>SellerShield ("we", "us", or "our") operates this compliance audit tool.</p>
   <h2>Information We Collect</h2>
-  <p>When you run a free audit, we collect:</p>
   <ul>
     <li>The store URL you submit for scanning</li>
-    <li>Publicly accessible content from that URL (page text, links, SSL status)</li>
+    <li>Publicly accessible content from that URL</li>
     <li>Your selected marketplace platforms</li>
   </ul>
-  <p>We do <strong>not</strong> collect your name, email address, or any personal identifiers unless you contact us directly.</p>
-
+  <p>We do <strong>not</strong> collect personal identifiers unless you contact us directly.</p>
   <h2>How We Use Your Data</h2>
-  <p>Your store URL and audit results are held in temporary server memory for up to 2 hours to allow report generation, then permanently deleted. We do not log, store, or analyze URLs beyond this window.</p>
-
-  <h2>Payment Information</h2>
-  <p>PDF report purchases are processed entirely by Gumroad. We never receive or store your payment card details. Gumroad's privacy policy governs payment data.</p>
-
+  <p>Audit results are held in temporary server memory for up to 2 hours, then permanently deleted.</p>
   <h2>Third-Party Services</h2>
   <ul>
-    <li><strong>Railway</strong> — cloud hosting provider. Server logs may include IP addresses per Railway's standard infrastructure practices.</li>
+    <li><strong>Railway</strong> — cloud hosting provider.</li>
     <li><strong>Gumroad</strong> — payment processor for PDF reports.</li>
+    <li><strong>Shopify</strong> — marketplace platform for the SellerShield app.</li>
   </ul>
-  <p>We do not sell, rent, or share your data with any other third parties.</p>
-
-  <h2>Cookies</h2>
-  <p>This site does not use tracking cookies, analytics cookies, or advertising cookies. No cookie consent is required.</p>
-
-  <h2>Your Rights</h2>
-  <p>Because we do not retain personally identifiable information beyond the 2-hour audit cache, there is generally no personal data to retrieve or delete. If you have questions, contact us.</p>
-
   <h2>Contact</h2>
   <p>For privacy questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
 </div>
@@ -268,35 +325,19 @@ def terms():
 <div class="page">
   <h1>Terms of Service</h1>
   <p class="meta">Last updated: June 2025</p>
-
-  <p>By using SellerShield you agree to these terms. Please read them carefully.</p>
-
+  <p>By using SellerShield you agree to these terms.</p>
   <h2>1. Informational Use Only</h2>
-  <p>SellerShield audit results are provided for informational purposes only. They do not constitute legal, compliance, or business advice. Marketplace policies change frequently — always verify findings against each platform's official documentation before taking action.</p>
-
+  <p>SellerShield audit results are for informational purposes only and do not constitute legal or compliance advice.</p>
   <h2>2. No Guarantee of Accuracy</h2>
-  <p>We make reasonable efforts to keep our rule database current, but we cannot guarantee that all findings are accurate, complete, or up to date. SellerShield is not liable for any account suspensions, penalties, or losses that arise from relying on our results.</p>
-
+  <p>We cannot guarantee that all findings are accurate, complete, or up to date.</p>
   <h2>3. Acceptable Use</h2>
-  <p>You agree not to:</p>
-  <ul>
-    <li>Use SellerShield to scan URLs you do not own or have permission to audit</li>
-    <li>Attempt to scrape, reverse-engineer, or abuse the scanning service</li>
-    <li>Submit malicious, illegal, or harmful URLs</li>
-  </ul>
-  <p>We reserve the right to block access for misuse without notice.</p>
-
+  <p>Do not scan URLs you do not own, abuse the scanning service, or submit malicious URLs.</p>
   <h2>4. PDF Reports and Refunds</h2>
-  <p>PDF reports are digital goods delivered immediately upon purchase. Because the full report content is revealed at the moment of download, all sales are final. If you experience a technical issue with your download, contact us and we will resolve it promptly.</p>
-
+  <p>PDF reports are digital goods. All sales are final.</p>
   <h2>5. Limitation of Liability</h2>
-  <p>To the fullest extent permitted by law, SellerShield's total liability for any claim arising from use of this service is limited to the amount you paid for your report (if any). We are not liable for indirect, incidental, or consequential damages.</p>
-
-  <h2>6. Changes to These Terms</h2>
-  <p>We may update these terms periodically. Continued use of the service after changes are posted constitutes acceptance of the revised terms.</p>
-
-  <h2>7. Contact</h2>
-  <p>Questions about these terms: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
+  <p>SellerShield's total liability is limited to the amount you paid (if any).</p>
+  <h2>6. Contact</h2>
+  <p>Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
 </div>
 {_footer()}</body></html>"""
 
@@ -309,20 +350,9 @@ def about():
 <body>{_nav()}
 <div class="page">
   <h1>About SellerShield</h1>
-
-  <p>SellerShield is a free marketplace compliance audit tool for e-commerce store owners. We scan your store against the real published rules used by Amazon, Google, Meta, TikTok Shop, and Walmart — and show you exactly what could get your account flagged or suspended.</p>
-
-  <h2>How It Works</h2>
-  <p>Enter your store URL and we'll crawl your public-facing pages, check for SSL, required policy pages, prohibited content patterns, and structured data requirements. You get a compliance score, platform-by-platform breakdown, and your top issues — free.</p>
-  <p>Want the full picture? The paid PDF report ($49) includes step-by-step fix instructions for every finding, written for non-technical store owners.</p>
-
-  <h2>Who Built This</h2>
-  <p>SellerShield was built by a team of e-commerce operators who got tired of discovering compliance problems the hard way — after getting flagged. We built the tool we wished existed.</p>
-
+  <p>SellerShield is a free marketplace compliance audit tool for e-commerce store owners.</p>
   <h2>Contact Us</h2>
-  <p>Have a question, found a bug, or want to partner with us?</p>
   <p>Email: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
-
   <p style="margin-top: 40px;"><a href="/" style="color: #22C55E; font-weight: 700;">← Run a Free Audit</a></p>
 </div>
 {_footer()}</body></html>"""
