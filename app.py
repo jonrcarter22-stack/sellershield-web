@@ -4,8 +4,8 @@ SellerShield Web App
 Flask server that runs compliance audits, serves results via a web UI,
 and acts as a Shopify embedded app with OAuth + billing.
 
-Free tier:  score, grade, platform breakdown, issue names only
-Paid tier:  full fix details + PDF download (linked to Gumroad)
+Free tier: score, grade, platform breakdown, issue names only
+Paid tier: full fix details + PDF download (linked to Gumroad)
 """
 
 import os
@@ -28,7 +28,7 @@ from report_generator import generate_pdf
 
 app = Flask(__name__)
 
-# ── In-memory audit cache (results live for 2 hours) ──────────────────────
+# In-memory audit cache (results live for 2 hours)
 _cache = {}
 _cache_lock = threading.Lock()
 
@@ -38,14 +38,14 @@ REPORTS_DIR.mkdir(exist_ok=True)
 GUMROAD_URL = "https://carterverse838.gumroad.com/l/pcarai"
 
 PLATFORM_LABELS = {
-    "google":  "Google Merchant Center",
-    "amazon":  "Amazon Seller Central",
-    "tiktok":  "TikTok Shop",
-    "meta":    "Meta Commerce",
+    "google": "Google Merchant Center",
+    "amazon": "Amazon Seller Central",
+    "tiktok": "TikTok Shop",
+    "meta": "Meta Commerce",
     "walmart": "Walmart Marketplace",
 }
 
-# ── Shopify App Config ─────────────────────────────────────────────────────
+# Shopify App Config
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY", "")
 SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET", "")
 APP_URL            = os.environ.get("APP_URL", "https://getsellershield.app")
@@ -59,7 +59,6 @@ _shop_tokens: dict = {}
 
 CONTACT_EMAIL = "jonrcarter22@gmail.com"
 
-
 def _verify_shopify_hmac(params: dict) -> bool:
     params = dict(params)
     hmac_value = params.pop("hmac", "")
@@ -68,7 +67,6 @@ def _verify_shopify_hmac(params: dict) -> bool:
         SHOPIFY_API_SECRET.encode(), sorted_params.encode(), hashlib.sha256
     ).hexdigest()
     return hmac_lib.compare_digest(expected, hmac_value)
-
 
 def _clean_cache():
     now = datetime.utcnow()
@@ -81,7 +79,6 @@ def _clean_cache():
                 pass
             del _cache[k]
 
-
 def _result_to_dict(result, audit_id: str) -> dict:
     platforms = []
     for ps in result.platform_scores:
@@ -89,8 +86,8 @@ def _result_to_dict(result, audit_id: str) -> dict:
         for f in ps.findings:
             findings.append({
                 "severity": f.severity, "category": f.category,
-                "message":  f.message,  "fix":      f.fix,
-                "evidence": f.evidence, "rule_id":  f.rule_id,
+                "message": f.message, "fix": f.fix,
+                "evidence": f.evidence, "rule_id": f.rule_id,
             })
         platforms.append({
             "name": ps.name, "platform": ps.platform,
@@ -116,16 +113,14 @@ def _result_to_dict(result, audit_id: str) -> dict:
         "crawl_error": result.crawl_error, "gumroad_url": GUMROAD_URL,
     }
 
-
-# ── Web Audit Routes ───────────────────────────────────────────────────────
+# Web Audit Routes
 
 @app.route("/")
 def index():
     shop = request.args.get("shop", "")
     if shop:
-        return shopify_install()
+        return flask_redirect(f"/shopify/dashboard?shop={shop}")
     return render_template("index.html", gumroad_url=GUMROAD_URL)
-
 
 @app.route("/audit", methods=["POST"])
 def run_audit():
@@ -158,7 +153,6 @@ def run_audit():
         }
     return jsonify(_cache[audit_id]["result_dict"])
 
-
 @app.route("/report/<audit_id>/pdf")
 def download_pdf(audit_id):
     _clean_cache()
@@ -172,8 +166,7 @@ def download_pdf(audit_id):
     filename = f"SellerShield_Report_{entry['result'].url.replace('https://', '').replace('/', '_')}.pdf"
     return send_file(pdf_path, as_attachment=True, download_name=filename)
 
-
-# ── Shopify OAuth Routes ───────────────────────────────────────────────────
+# Shopify OAuth Routes
 
 @app.route("/shopify/install")
 def shopify_install():
@@ -187,7 +180,6 @@ def shopify_install():
         f"&redirect_uri={APP_URL}/auth/callback"
     )
     return flask_redirect(auth_url)
-
 
 @app.route("/auth/callback")
 def shopify_callback():
@@ -223,8 +215,8 @@ def shopify_callback():
             ).get("confirmation_url", "")
             if confirmation_url:
                 return flask_redirect(confirmation_url)
-    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
-
+    # Redirect directly to dashboard to avoid OAuth loop
+    return flask_redirect(f"{APP_URL}/shopify/dashboard?shop={shop}")
 
 @app.route("/billing/callback")
 def billing_callback():
@@ -232,49 +224,52 @@ def billing_callback():
     charge_id = request.args.get("charge_id", "")
     token = _shop_tokens.get(shop, "")
     if not token:
-        return "Shop not authenticated", 403
+        return flask_redirect(f"/shopify/install?shop={shop}")
     http_req.post(
         f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}/activate.json",
         headers={"X-Shopify-Access-Token": token},
         json={"recurring_application_charge": {"id": charge_id}},
         timeout=10,
     )
-    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
-
+    return flask_redirect(f"{APP_URL}/shopify/dashboard?shop={shop}")
 
 @app.route("/shopify/dashboard")
 def shopify_dashboard():
-    shop = request.args.get("shop", "")
+    shop = request.args.get("shop", "").strip()
+    if not shop:
+        return "Missing shop parameter", 400
     token = _shop_tokens.get(shop, "")
+    if not token:
+        # No token after server restart - re-run OAuth seamlessly
+        return flask_redirect(f"/shopify/install?shop={shop}")
     return render_template(
-        "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=bool(token)
+        "shopify_dashboard.html", shop=shop, app_url=APP_URL, authenticated=True
     )
 
-
-# ── Static Pages ───────────────────────────────────────────────────────────
+# Static Pages
 
 _PAGE_STYLE = """
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         background: #0B1120; color: #CBD5E1; min-height: 100vh; }
-  nav { display: flex; align-items: center; justify-content: space-between;
-        padding: 18px 48px; border-bottom: 1px solid rgba(255,255,255,.08); }
-  .logo { font-size: 1.4rem; font-weight: 800; color: #fff; text-decoration: none; }
-  .logo span { color: #22C55E; }
-  nav a { color: #CBD5E1; text-decoration: none; font-size: .9rem; }
-  nav a:hover { color: #fff; }
-  .page { max-width: 720px; margin: 0 auto; padding: 56px 24px 80px; }
-  h1 { font-size: 2rem; font-weight: 800; color: #fff; margin-bottom: 8px; }
-  .meta { color: #64748B; font-size: .85rem; margin-bottom: 40px; }
-  h2 { font-size: 1.1rem; font-weight: 700; color: #fff; margin: 32px 0 10px; }
-  p { color: #CBD5E1; line-height: 1.7; margin-bottom: 12px; }
-  ul { color: #CBD5E1; line-height: 1.8; padding-left: 20px; margin-bottom: 12px; }
-  a { color: #22C55E; }
-  footer { text-align: center; padding: 32px 24px;
-           border-top: 1px solid rgba(255,255,255,.06);
-           color: #64748B; font-size: .82rem; }
-  footer a { color: #64748B; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+       background: #0B1120; color: #CBD5E1; min-height: 100vh; }
+nav { display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 48px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.logo { font-size: 1.4rem; font-weight: 800; color: #fff; text-decoration: none; }
+.logo span { color: #22C55E; }
+nav a { color: #CBD5E1; text-decoration: none; font-size: .9rem; }
+nav a:hover { color: #fff; }
+.page { max-width: 720px; margin: 0 auto; padding: 56px 24px 80px; }
+h1 { font-size: 2rem; font-weight: 800; color: #fff; margin-bottom: 8px; }
+.meta { color: #64748B; font-size: .85rem; margin-bottom: 40px; }
+h2 { font-size: 1.1rem; font-weight: 700; color: #fff; margin: 32px 0 10px; }
+p { color: #CBD5E1; line-height: 1.7; margin-bottom: 12px; }
+ul { color: #CBD5E1; line-height: 1.8; padding-left: 20px; margin-bottom: 12px; }
+a { color: #22C55E; }
+footer { text-align: center; padding: 32px 24px;
+         border-top: 1px solid rgba(255,255,255,.06);
+         color: #64748B; font-size: .82rem; }
+footer a { color: #64748B; }
 </style>
 """
 
@@ -282,81 +277,77 @@ def _nav():
     return f'<nav><a class="logo" href="/">Seller<span>Shield</span></a><a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></nav>'
 
 def _footer():
-    return f'<footer><p>SellerShield &nbsp;·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms">Terms of Service</a> &nbsp;·&nbsp; <a href="/about">About</a></p><p style="margin-top:8px;">Results are informational only. Always verify against official platform documentation.</p></footer>'
-
+    return f'<footer><p>SellerShield &nbsp; <a href="/privacy">Privacy Policy</a> &nbsp; <a href="/terms">Terms of Service</a> &nbsp; <a href="/about">About</a></p><p style="margin-top:8px;">Results are informational only. Always verify against official platform documentation.</p></footer>'
 
 @app.route("/privacy")
 def privacy():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Privacy Policy — SellerShield</title>{_PAGE_STYLE}</head>
+<title>Privacy Policy - SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
-  <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: June 2025</p>
-  <p>SellerShield ("we", "us", or "our") operates this compliance audit tool.</p>
-  <h2>Information We Collect</h2>
-  <ul>
-    <li>The store URL you submit for scanning</li>
-    <li>Publicly accessible content from that URL</li>
-    <li>Your selected marketplace platforms</li>
-  </ul>
-  <p>We do <strong>not</strong> collect personal identifiers unless you contact us directly.</p>
-  <h2>How We Use Your Data</h2>
-  <p>Audit results are held in temporary server memory for up to 2 hours, then permanently deleted.</p>
-  <h2>Third-Party Services</h2>
-  <ul>
-    <li><strong>Railway</strong> — cloud hosting provider.</li>
-    <li><strong>Gumroad</strong> — payment processor for PDF reports.</li>
-    <li><strong>Shopify</strong> — marketplace platform for the SellerShield app.</li>
-  </ul>
-  <h2>Contact</h2>
-  <p>For privacy questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
+<h1>Privacy Policy</h1>
+<p class="meta">Last updated: June 2025</p>
+<p>SellerShield ("we", "us", or "our") operates this compliance audit tool.</p>
+<h2>Information We Collect</h2>
+<ul>
+<li>The store URL you submit for scanning</li>
+<li>Publicly accessible content from that URL</li>
+<li>Your selected marketplace platforms</li>
+</ul>
+<p>We do not collect personal identifiers unless you contact us directly.</p>
+<h2>How We Use Your Data</h2>
+<p>Audit results are held in temporary server memory for up to 2 hours, then permanently deleted.</p>
+<h2>Third-Party Services</h2>
+<ul>
+<li>Railway - cloud hosting provider.</li>
+<li>Gumroad - payment processor for PDF reports.</li>
+<li>Shopify - marketplace platform for the SellerShield app.</li>
+</ul>
+<h2>Contact</h2>
+<p>For privacy questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
 </div>
 {_footer()}</body></html>"""
-
 
 @app.route("/terms")
 def terms():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Terms of Service — SellerShield</title>{_PAGE_STYLE}</head>
+<title>Terms of Service - SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
-  <h1>Terms of Service</h1>
-  <p class="meta">Last updated: June 2025</p>
-  <p>By using SellerShield you agree to these terms.</p>
-  <h2>1. Informational Use Only</h2>
-  <p>SellerShield audit results are for informational purposes only and do not constitute legal or compliance advice.</p>
-  <h2>2. No Guarantee of Accuracy</h2>
-  <p>We cannot guarantee that all findings are accurate, complete, or up to date.</p>
-  <h2>3. Acceptable Use</h2>
-  <p>Do not scan URLs you do not own, abuse the scanning service, or submit malicious URLs.</p>
-  <h2>4. PDF Reports and Refunds</h2>
-  <p>PDF reports are digital goods. All sales are final.</p>
-  <h2>5. Limitation of Liability</h2>
-  <p>SellerShield's total liability is limited to the amount you paid (if any).</p>
-  <h2>6. Contact</h2>
-  <p>Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
+<h1>Terms of Service</h1>
+<p class="meta">Last updated: June 2025</p>
+<p>By using SellerShield you agree to these terms.</p>
+<h2>1. Informational Use Only</h2>
+<p>SellerShield audit results are for informational purposes only and do not constitute legal or compliance advice.</p>
+<h2>2. No Guarantee of Accuracy</h2>
+<p>We cannot guarantee that all findings are accurate, complete, or up to date.</p>
+<h2>3. Acceptable Use</h2>
+<p>Do not scan URLs you do not own, abuse the scanning service, or submit malicious URLs.</p>
+<h2>4. PDF Reports and Refunds</h2>
+<p>PDF reports are digital goods. All sales are final.</p>
+<h2>5. Limitation of Liability</h2>
+<p>SellerShield total liability is limited to the amount you paid (if any).</p>
+<h2>6. Contact</h2>
+<p>Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
 </div>
 {_footer()}</body></html>"""
-
 
 @app.route("/about")
 def about():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>About — SellerShield</title>{_PAGE_STYLE}</head>
+<title>About - SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
-  <h1>About SellerShield</h1>
-  <p>SellerShield is a free marketplace compliance audit tool for e-commerce store owners.</p>
-  <h2>Contact Us</h2>
-  <p>Email: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
-  <p style="margin-top: 40px;"><a href="/" style="color: #22C55E; font-weight: 700;">← Run a Free Audit</a></p>
+<h1>About SellerShield</h1>
+<p>SellerShield is a free marketplace compliance audit tool for e-commerce store owners.</p>
+<h2>Contact Us</h2>
+<p>Email: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
+<p style="margin-top: 40px;"><a href="/" style="color: #22C55E; font-weight: 700;">Run a Free Audit</a></p>
 </div>
 {_footer()}</body></html>"""
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
