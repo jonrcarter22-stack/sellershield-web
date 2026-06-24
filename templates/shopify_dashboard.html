@@ -638,7 +638,7 @@ function escHtml(str) {
 
 // ── Upgrade modal ─────────────────────────────────────────────
 function openUpgradeModal() {
-  // Update button labels based on current plan
+  // Update button labels and card highlight based on current plan
   var activePlanKey = ((currentPlan && currentPlan.name) || "free").toLowerCase();
   var planOrder = ["free", "starter", "growth", "pro"];
   var activeIdx = planOrder.indexOf(activePlanKey);
@@ -647,14 +647,19 @@ function openUpgradeModal() {
     var idx = planOrder.indexOf(key);
     var btn = card.querySelector(".plan-btn");
     if (key === activePlanKey) {
+      card.style.border = "2px solid #005bd3";
       btn.textContent = "Current plan";
       btn.disabled = true;
-    } else if (idx < activeIdx) {
-      btn.textContent = "Downgrade";
-      btn.disabled = false;
     } else {
-      btn.textContent = "Start free trial";
-      btn.disabled = false;
+      // preserve growth's green border if it's not the active plan
+      if (key !== "growth") card.style.border = "2px solid #e1e3e5";
+      if (idx < activeIdx) {
+        btn.textContent = "Downgrade";
+        btn.disabled = false;
+      } else {
+        btn.textContent = "Start free trial";
+        btn.disabled = false;
+      }
     }
   });
   document.getElementById("upgrade-modal").style.display = "block";
