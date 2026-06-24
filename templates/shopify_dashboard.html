@@ -525,6 +525,11 @@ function applyFix(violationId, fixType, btn) {
   btn.innerHTML = '<span class="spinner"></span>';
 
   api("POST", "/api/fix/" + violationId, { shop: SHOP }).then(function(d) {
+    if (d.admin_auth_url) {
+      // Non-expiring token — redirect through per-user OAuth to get a fresh token
+      try { window.top.location.href = d.admin_auth_url; } catch(e) { window.location.href = d.admin_auth_url; }
+      return;
+    }
     if (d.error) {
       toast("Fix failed: " + d.error, "error");
       btn.disabled = false;
@@ -699,6 +704,18 @@ function selectPlan(planKey, btn) {
 }
 
 // ── Init ──────────────────────────────────────────────────────
+// Check if we're returning from a per-user OAuth fix flow
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var fixResult = params.get("fix_result");
+  if (fixResult === "success") {
+    var title = params.get("fix_title") || "page";
+    setTimeout(function() { toast("Fix applied: " + decodeURIComponent(title) + " created!", "success"); }, 500);
+  } else if (fixResult === "error") {
+    var msg = params.get("fix_msg") || "Unknown error";
+    setTimeout(function() { toast("Fix failed: " + decodeURIComponent(msg), "error"); }, 500);
+  }
+})();
 renderChannelTabs();
 loadDashboard();
 loadViolations();
