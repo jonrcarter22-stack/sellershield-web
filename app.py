@@ -1278,11 +1278,11 @@ def _run_scheduled_scans():
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 # Find shops due for a scheduled scan
                 cur.execute("""
-                    SELECT sp.shop, sp.plan_key,
+                    SELECT sp.shop, sp.plan_name as plan_key,
                            s.completed_at as last_scan,
-                           i.token
+                           i.access_token as token
                     FROM shop_plans sp
-                    JOIN installs i ON sp.shop = i.shop
+                    JOIN shop_installs i ON sp.shop = i.shop
                     LEFT JOIN LATERAL (
                         SELECT completed_at FROM scans
                         WHERE shop = sp.shop AND status = 'done'
