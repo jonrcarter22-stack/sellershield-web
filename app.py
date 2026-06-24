@@ -1260,6 +1260,31 @@ def api_apply_fix(violation_id):
     return jsonify({"error": "Fix type not supported", "fix_type": fix_type}), 400
 
 
+@app.route("/api/fix/<int:violation_id>/confirm", methods=["POST"])
+@require_api_auth
+def api_confirm_fix(violation_id):
+    """Merchant confirms they manually completed a guided fix."""
+    shop = request.shop
+    # Verify violation belongs to this shop
+    if DATABASE_URL and psycopg2:
+        try:
+            with _db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, rule_id, title FROM violations WHERE id=%s AND shop=%s",
+                        (violation_id, shop)
+                    )
+                    v = cur.fetchone()
+            if not v:
+                return jsonify({"error": "Violation not found"}), 404
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    _db_save_fix(shop, violation_id, "guided_confirmed",
+                 {"action": "merchant_confirmed"}, {})
+    print(f"[confirm] violation {violation_id} marked resolved by merchant ({shop})")
+    return jsonify({"success": True})
+
+
 @app.route("/api/fix/<int:fix_id>/revert", methods=["POST"])
 @require_api_auth
 def api_revert_fix(fix_id):
@@ -1530,7 +1555,7 @@ mutation AppSubscriptionCancel($id: ID!) {
 }
 """
         try:
-            resp = requests.post(
+            resp = http_req.post(
                 f"https://{shop}/admin/api/2024-01/graphql.json",
                 headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
                 json={"query": gql, "variables": {"id": str(charge_id)}},
