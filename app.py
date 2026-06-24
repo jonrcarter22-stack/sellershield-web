@@ -572,6 +572,19 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
         install  = _db_get_install(shop)
         token    = install[0] if install else None
 
+        # Archive old open violations so they don't stack up across scans
+        if DATABASE_URL and psycopg2:
+            try:
+                with _db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE violations SET status='superseded' WHERE shop=%s AND status='open'",
+                            (shop,)
+                        )
+                    conn.commit()
+            except Exception as e:
+                print(f"[scan] archive old violations error: {e}")
+
         violations = []
 
         # ── Phase 3: Channel-specific compliance scanner (Shopify API-based) ──
