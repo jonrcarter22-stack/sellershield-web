@@ -65,8 +65,7 @@ SHOPIFY_BILLING_TEST = os.environ.get("SHOPIFY_BILLING_TEST", "true").lower() ==
 DATABASE_URL       = os.environ.get("DATABASE_URL", "")
 SHOPIFY_SCOPES = (
     "read_products,write_products,read_orders,"
-    "read_customers,read_script_tags,write_script_tags,"
-    "write_pages,read_shipping,write_metafields"
+    "read_customers,read_script_tags,write_script_tags"
 )
 
 # In-memory fallback (used when no DATABASE_URL is set)
@@ -1176,15 +1175,39 @@ def api_apply_fix(violation_id):
     # ── Auto fix ──────────────────────────────────────────────────────────
     if fix_type == "auto":
         if rule_id in _POLICY_RULE_MAP:
-            # If token is non-expiring, we can't write pages — need per-user OAuth
-            if not _is_token_expiring(shop):
-                auth_url = (
-                    f"{APP_URL}/shopify/admin-auth"
-                    f"?shop={shop}&violation_id={violation_id}"
-                )
-                return jsonify({"admin_auth_url": auth_url})
-            result = _auto_fix_policy_page(shop, token, violation_id, rule_id)
-            return jsonify(result)
+            # Generate page content server-side and guide merchant to create it
+            policy_key = _POLICY_RULE_MAP[rule_id]
+            tmpl = _POLICY_TEMPLATES.get(policy_key)
+            if not tmpl:
+                return jsonify({"error": "Unknown policy template"}), 400
+            shop_info = _get_shop_info(shop, token)
+            page_html = tmpl["body"](shop_info)
+            page_title = tmpl["title"]
+            store_name = shop.replace(".myshopify.com", "")
+            deep_link = (
+                f"https://admin.shopify.com/store/{store_name}/content/pages/new"
+            )
+            # Mark violation as in_progress
+            try:
+                with _db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE violations SET status='in_progress' WHERE id=%s",
+                            (violation_id,)
+                        )
+                    conn.commit()
+            except Exception as e:
+                print(f"[fix] in_progress update error: {e}")
+            return jsonify({
+                "guided": True,
+                "title": page_title,
+                "content": page_html,
+                "deep_link": deep_link,
+                "instructions": (
+                    f"We've generated your {page_title} content. "
+                    f"Copy it below, then click 'Open Page Editor' to paste it into Shopify."
+                ),
+            })
         return jsonify({"error": f"No auto-fix handler for {rule_id}"}), 400
 
     # ── One-click fix ─────────────────────────────────────────────────────
