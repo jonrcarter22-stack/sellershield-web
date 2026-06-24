@@ -1343,6 +1343,24 @@ def _run_scheduled_scans():
             print(f"[scheduler] Scan error for {shop}: {e}")
 
 
+@app.route("/setup-db")
+def setup_db():
+    """One-time route to create all DB tables. Safe to run multiple times."""
+    if not DATABASE_URL or not psycopg2:
+        return "No DATABASE_URL set", 500
+    try:
+        _init_db()
+        _init_extended_schema()
+        return """
+        <h2 style="font-family:sans-serif;color:green">✓ Database tables created successfully</h2>
+        <p style="font-family:sans-serif">
+        <a href="/shopify/install?shop=sellershield-test.myshopify.com">Click here to reinstall the app</a>
+        </p>
+        """, 200
+    except Exception as e:
+        return f"<h2 style='color:red'>Error: {e}</h2>", 500
+
+
 def _verify_shopify_hmac(params: dict) -> bool:
     params = dict(params)
     hmac_value = params.pop("hmac", "")
