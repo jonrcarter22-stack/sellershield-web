@@ -444,7 +444,7 @@ function loadViolations() {
       var fixBtn = "";
       if (locked) {
         fixBtn = '<span class="locked-badge">🔒 Upgrade to fix</span>';
-      } else if (v.status === "fixed") {
+      } else if (v.status === "resolved") {
         fixBtn = '<span class="badge badge-success">✓ Fixed</span>' +
                  '<button class="btn btn-danger btn-sm" onclick="revertFix(\'' + v.fix_id + '\',this)">Revert</button>';
       } else if (fixType === "auto") {
