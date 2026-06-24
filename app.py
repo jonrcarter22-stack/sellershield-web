@@ -72,7 +72,20 @@ SHOPIFY_SCOPES = (
 # In-memory fallback (used when no DATABASE_URL is set)
 _shop_tokens: dict = {}
 
-CONTACT_EMAIL = "jonrcarter22@gmail.com"
+CONTACT_EMAIL  = "jonrcarter22@gmail.com"
+ALERT_EMAIL    = os.environ.get("ALERT_FROM_EMAIL", CONTACT_EMAIL)
+SMTP_HOST      = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT      = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER      = os.environ.get("SMTP_USER", "")
+SMTP_PASS      = os.environ.get("SMTP_PASS", "")
+
+# Shopify billing price map (plan_key → monthly price USD)
+_PLAN_PRICES = {
+    "free":    0.00,
+    "starter": 29.00,
+    "growth":  69.00,
+    "pro":     99.00,
+}
 
 
 # ── Database helpers ───────────────────────────────────────────────────────
@@ -1103,6 +1116,224 @@ def api_plan():
     return jsonify({"plan": request.plan, "all_plans": PLAN_LIMITS})
 
 
+@app.route("/api/plan/upgrade", methods=["POST"])
+@require_api_auth
+def api_plan_upgrade():
+    """Initiate a Shopify billing charge for a plan upgrade."""
+    shop  = request.shop
+    token = request.shop_token
+    data  = request.get_json(silent=True) or {}
+    new_plan_key = data.get("plan", "").lower()
+
+    if new_plan_key not in PLAN_LIMITS:
+        return jsonify({"error": f"Unknown plan: {new_plan_key}"}), 400
+
+    price = _PLAN_PRICES.get(new_plan_key, 0)
+
+    # Free plan — just update the DB, no charge
+    if price == 0:
+        _db_set_plan(shop, new_plan_key)
+        return jsonify({"success": True, "plan": new_plan_key})
+
+    plan_info = PLAN_LIMITS[new_plan_key]
+    charge_body = {
+        "recurring_application_charge": {
+            "name":       f"SellerShield {plan_info['name']}",
+            "price":      price,
+            "return_url": f"{APP_URL}/billing/callback?shop={shop}&plan={new_plan_key}",
+            "test":       SHOPIFY_BILLING_TEST,
+            "trial_days": 7,
+        }
+    }
+    resp = http_req.post(
+        f"https://{shop}/admin/api/2024-01/recurring_application_charges.json",
+        headers={"X-Shopify-Access-Token": token},
+        json=charge_body, timeout=10,
+    )
+    if resp.status_code == 201:
+        confirmation_url = resp.json().get(
+            "recurring_application_charge", {}
+        ).get("confirmation_url", "")
+        return jsonify({"confirmation_url": confirmation_url})
+
+    return jsonify({"error": f"Billing API error: {resp.text[:200]}"}), 500
+
+
+@app.route("/shopify/plans")
+def shopify_plans():
+    shop = request.args.get("shop", "").strip()
+    host = request.args.get("host", "")
+    if not shop:
+        return "Missing shop parameter", 400
+    install = _db_get_install(shop)
+    current_plan = _db_get_plan(shop)
+    resp = make_response(render_template(
+        "shopify_plans.html",
+        shop=shop, host=host, app_url=APP_URL,
+        api_key=SHOPIFY_API_KEY,
+        current_plan_key=current_plan.get("key", "free"),
+        contact_email=CONTACT_EMAIL,
+    ))
+    resp.headers["Content-Security-Policy"] = (
+        "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+    )
+    return resp
+
+
+# ── Email alert helpers ────────────────────────────────────────────────────
+
+def _send_alert_email(to_email: str, subject: str, body_html: str):
+    """Send an HTML email via SMTP. Silently no-ops if SMTP not configured."""
+    if not SMTP_USER or not SMTP_PASS:
+        print(f"[email] SMTP not configured; skipping alert to {to_email}")
+        return
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = f"SellerShield <{ALERT_EMAIL}>"
+        msg["To"]      = to_email
+        msg.attach(MIMEText(body_html, "html"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(ALERT_EMAIL, [to_email], msg.as_string())
+        print(f"[email] Alert sent to {to_email}: {subject}")
+    except Exception as e:
+        print(f"[email] Send error: {e}")
+
+
+def _build_alert_email(shop: str, violations: list, score: int) -> str:
+    rows = ""
+    for v in violations[:10]:
+        sev   = v.get("severity", "")
+        color = {"critical": "#d72c0d", "high": "#e08600"}.get(sev, "#6d7175")
+        rows += (
+            f'<tr><td style="padding:8px 12px;border-bottom:1px solid #eee">'
+            f'<span style="color:{color};font-weight:700">{sev.upper()}</span></td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid #eee">'
+            f'{v.get("title","")}</td></tr>'
+        )
+    store_name = shop.replace(".myshopify.com", "")
+    dashboard_url = f"{APP_URL}/shopify/dashboard?shop={shop}"
+    return f"""
+<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto">
+  <div style="background:#008060;padding:24px 32px;border-radius:8px 8px 0 0">
+    <h1 style="color:#fff;margin:0;font-size:20px">SellerShield Compliance Alert</h1>
+    <p style="color:rgba(255,255,255,.8);margin:4px 0 0;font-size:14px">{shop}</p>
+  </div>
+  <div style="background:#fff;padding:24px 32px;border:1px solid #e1e3e5;border-top:none">
+    <p style="font-size:15px">Your latest compliance scan found <strong>{len(violations)} violation(s)</strong>
+    with an overall score of <strong>{score}/100</strong>.</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0">
+      <thead><tr>
+        <th style="text-align:left;padding:8px 12px;background:#f6f6f7;font-size:12px">SEVERITY</th>
+        <th style="text-align:left;padding:8px 12px;background:#f6f6f7;font-size:12px">ISSUE</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    {'<p style="color:#6d7175;font-size:13px">+ ' + str(len(violations)-10) + ' more violations…</p>' if len(violations) > 10 else ''}
+    <a href="{dashboard_url}" style="display:inline-block;background:#008060;color:#fff;padding:12px 24px;
+       border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;margin-top:8px">
+      View &amp; Fix Violations →
+    </a>
+  </div>
+  <p style="text-align:center;color:#6d7175;font-size:12px;padding:16px">
+    You're receiving this because your SellerShield plan includes email alerts.<br>
+    <a href="{APP_URL}/shopify/plans?shop={shop}" style="color:#6d7175">Manage plan</a>
+  </p>
+</div>"""
+
+
+# ── Scheduled scan engine ──────────────────────────────────────────────────
+
+def _scheduler_loop():
+    """Background thread: auto-scan shops based on their plan frequency."""
+    import time as _time
+    print("[scheduler] Started")
+    while True:
+        try:
+            _run_scheduled_scans()
+        except Exception as e:
+            print(f"[scheduler] Error: {e}")
+        _time.sleep(3600)  # Check every hour
+
+
+def _run_scheduled_scans():
+    if not DATABASE_URL or not psycopg2:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Find shops due for a scheduled scan
+                cur.execute("""
+                    SELECT sp.shop, sp.plan_key,
+                           s.completed_at as last_scan,
+                           i.token
+                    FROM shop_plans sp
+                    JOIN installs i ON sp.shop = i.shop
+                    LEFT JOIN LATERAL (
+                        SELECT completed_at FROM scans
+                        WHERE shop = sp.shop AND status = 'done'
+                        ORDER BY completed_at DESC LIMIT 1
+                    ) s ON true
+                    WHERE sp.plan_key != 'free'
+                """)
+                rows = cur.fetchall()
+    except Exception as e:
+        print(f"[scheduler] DB error: {e}")
+        return
+
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+
+    freq_hours = {"starter": 168, "growth": 24, "pro": 1}  # weekly, daily, hourly
+
+    for row in rows:
+        shop     = row["shop"]
+        plan_key = row["plan_key"]
+        token    = row["token"]
+        last     = row["last_scan"]
+        hours    = freq_hours.get(plan_key, 168)
+
+        if last:
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            elapsed = (now - last).total_seconds() / 3600
+            if elapsed < hours:
+                continue  # Not due yet
+
+        print(f"[scheduler] Triggering scan for {shop} (plan={plan_key})")
+        try:
+            plan  = PLAN_LIMITS.get(plan_key, PLAN_LIMITS["free"])
+            info  = _get_shop_info(shop, token)
+            url   = f"https://{info.get('domain', shop)}"
+            scan_id = _db_create_scan(shop)
+            t = threading.Thread(
+                target=_run_scan_for_shop,
+                args=(shop, url, scan_id, plan),
+                daemon=True
+            )
+            t.start()
+            t.join(timeout=120)  # Wait up to 2 min for scan
+
+            # Send email alert if violations found
+            if plan.get("channels"):
+                shop_email = info.get("email", "")
+                if shop_email:
+                    violations = _db_get_violations(shop, status="open")
+                    if violations:
+                        scan = _db_get_latest_scan(shop)
+                        score = scan.get("overall_score", 0) or 0
+                        subject = f"SellerShield: {len(violations)} compliance issue(s) found in your store"
+                        html = _build_alert_email(shop, violations, score)
+                        _send_alert_email(shop_email, subject, html)
+        except Exception as e:
+            print(f"[scheduler] Scan error for {shop}: {e}")
+
+
 def _verify_shopify_hmac(params: dict) -> bool:
     params = dict(params)
     hmac_value = params.pop("hmac", "")
@@ -1553,6 +1784,10 @@ def about():
 # ── Startup ────────────────────────────────────────────────────────────────
 _init_db()
 _init_extended_schema()
+
+# Start background scheduler (auto-scans based on plan frequency)
+_scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
+_scheduler_thread.start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
