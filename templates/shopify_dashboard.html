@@ -246,6 +246,9 @@ body {
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="badge badge-plan" id="plan-badge">Loading plan…</span>
+      <button class="btn btn-secondary" id="alert-test-btn" onclick="sendTestAlert()" title="Send a test compliance alert email" style="display:none">
+        ✉ Test Alert
+      </button>
       <button class="btn btn-primary" id="scan-btn" onclick="runScan()">
         <span id="scan-btn-text">▶ Run Scan</span>
       </button>
@@ -255,7 +258,7 @@ body {
   <!-- Plan banner (shown for free/starter) -->
   <div class="plan-banner upgrade" id="upgrade-banner" style="display:none"><!-- shown by JS -->
     <div class="plan-banner-text">
-      <h3>🔒 Upgrade to unlock full compliance</h3>
+      <h3 id="upgrade-banner-title">🔒 Upgrade to unlock full compliance</h3>
       <p id="upgrade-text">Upgrade your plan to access auto-fix, more channels, and daily scans.</p>
     </div>
     <button class="btn btn-secondary" id="upgrade-btn" onclick="openUpgradeModal()">Upgrade Plan</button>
@@ -471,6 +474,14 @@ function loadDashboard() {
     var planName = (plan.name || "Free").toUpperCase();
     document.getElementById("plan-badge").textContent = "📋 " + planName;
 
+    // Test alert button — only for paid plans
+    var alertBtn = document.getElementById("alert-test-btn");
+    if (planName !== "FREE") {
+      alertBtn.style.display = "";
+    } else {
+      alertBtn.style.display = "none";
+    }
+
     // Plan banner — always visible
     var banner = document.getElementById("upgrade-banner");
     banner.style.display = "flex";
@@ -484,9 +495,11 @@ function loadDashboard() {
     document.getElementById("upgrade-text").textContent =
       bannerMessages[planName] || "Manage your SellerShield subscription.";
     if (planName === "PRO") {
+      document.getElementById("upgrade-banner-title").textContent = "✅ Full compliance monitoring active";
       upgradeBtn.textContent = "Manage Plan";
       banner.classList.remove("upgrade");
     } else {
+      document.getElementById("upgrade-banner-title").textContent = "🔒 Upgrade to unlock full compliance";
       upgradeBtn.textContent = planName === "FREE" || planName === "STARTER" ? "Upgrade Plan" : "Manage Plan";
       banner.classList.add("upgrade");
     }
@@ -676,6 +689,23 @@ function revertFix(fixId, btn) {
     loadViolations();
     loadDashboard();
   }).catch(function() { toast("Network error reverting fix.", "error"); });
+}
+
+// ── Test alert email ──────────────────────────────────────────
+function sendTestAlert() {
+  var btn = document.getElementById("alert-test-btn");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  api("POST", "/api/test-alert", { shop: SHOP }).then(function(d) {
+    btn.disabled = false;
+    btn.textContent = "✉ Test Alert";
+    if (d.error) { toast("Alert failed: " + d.error, "error"); return; }
+    toast("Test alert sent to " + d.sent_to + " — check your inbox!", "success");
+  }).catch(function() {
+    btn.disabled = false;
+    btn.textContent = "✉ Test Alert";
+    toast("Could not send test alert.", "error");
+  });
 }
 
 // ── Run scan ──────────────────────────────────────────────────
