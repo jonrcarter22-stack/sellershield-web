@@ -263,11 +263,11 @@ body {
 
   <!-- Upgrade modal -->
   <div id="upgrade-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;overflow-y:auto">
-    <div style="background:#fff;max-width:720px;margin:40px auto;border-radius:12px;padding:32px;position:relative">
+    <div style="background:#fff;max-width:900px;margin:40px auto;border-radius:12px;padding:32px;position:relative">
       <button onclick="closeUpgradeModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6d7175">✕</button>
       <h2 style="font-size:22px;font-weight:800;margin-bottom:4px">Choose your plan</h2>
       <p style="color:#6d7175;font-size:14px;margin-bottom:24px">All paid plans include a 7-day free trial. Cancel anytime.</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px" id="plan-cards">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px" id="plan-cards">
         <div style="border:2px solid #e1e3e5;border-radius:10px;padding:20px" data-plan="free">
           <div style="font-size:11px;font-weight:700;color:#6d7175;letter-spacing:.06em;margin-bottom:6px">FREE</div>
           <div style="font-size:28px;font-weight:800;margin-bottom:12px">$0</div>
@@ -293,7 +293,8 @@ body {
           </ul>
           <button class="btn btn-primary plan-btn" style="width:100%;font-size:13px" onclick="selectPlan('growth',this)">Start free trial</button>
         </div>
-        <div style="border:2px solid #e1e3e5;border-radius:10px;padding:20px" data-plan="pro">
+        <div style="border:2px solid #b8860b;border-radius:10px;padding:20px;position:relative" data-plan="pro">
+          <div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:linear-gradient(90deg,#b8860b,#d4a017);color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;white-space:nowrap">MOST POWERFUL</div>
           <div style="font-size:11px;font-weight:700;color:#6d7175;letter-spacing:.06em;margin-bottom:6px">PRO</div>
           <div style="font-size:28px;font-weight:800;margin-bottom:12px">$99<span style="font-size:14px;font-weight:400;color:#6d7175">/mo</span></div>
           <ul style="list-style:none;font-size:13px;color:#6d7175;margin-bottom:16px;line-height:1.8">
@@ -650,16 +651,18 @@ function openUpgradeModal() {
       card.style.border = "2px solid #005bd3";
       btn.textContent = "Current plan";
       btn.disabled = true;
+    } else if (idx < activeIdx) {
+      // Downgrade — muted gray border
+      card.style.border = "2px solid #c9cccf";
+      btn.textContent = "Downgrade";
+      btn.disabled = false;
     } else {
-      // preserve growth's green border if it's not the active plan
-      if (key !== "growth") card.style.border = "2px solid #e1e3e5";
-      if (idx < activeIdx) {
-        btn.textContent = "Downgrade";
-        btn.disabled = false;
-      } else {
-        btn.textContent = activePlanKey === "free" ? "Start free trial" : "Upgrade";
-        btn.disabled = false;
-      }
+      // Upgrade — restore default brand borders
+      if (key === "growth") card.style.border = "2px solid #008060";
+      else if (key === "pro") card.style.border = "2px solid #b8860b";
+      else card.style.border = "2px solid #e1e3e5";
+      btn.textContent = activePlanKey === "free" ? "Start free trial" : "Upgrade";
+      btn.disabled = false;
     }
   });
   document.getElementById("upgrade-modal").style.display = "block";
