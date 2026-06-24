@@ -72,11 +72,12 @@ SHOPIFY_SCOPES = (
 _shop_tokens: dict = {}
 
 CONTACT_EMAIL  = "jonrcarter22@gmail.com"
-ALERT_EMAIL    = os.environ.get("ALERT_FROM_EMAIL", CONTACT_EMAIL)
+ALERT_EMAIL    = os.environ.get("ALERT_FROM_EMAIL", "alerts@getsellershield.app")
 SMTP_HOST      = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT      = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER      = os.environ.get("SMTP_USER", "")
 SMTP_PASS      = os.environ.get("SMTP_PASS", "")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")  # https://resend.com — free tier, no SMTP needed
 
 # Shopify billing price map (plan_key → monthly price USD)
 _PLAN_PRICES = {
@@ -1600,9 +1601,34 @@ def shopify_plans():
 # ── Email alert helpers ────────────────────────────────────────────────────
 
 def _send_alert_email(to_email: str, subject: str, body_html: str):
-    """Send an HTML email via SMTP. Silently no-ops if SMTP not configured."""
+    """Send an HTML email via Resend API (preferred) or SMTP fallback."""
+    # ── Resend API (preferred — set RESEND_API_KEY in Railway env vars) ──
+    if RESEND_API_KEY:
+        try:
+            resp = http_req.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": f"SellerShield <{ALERT_EMAIL}>",
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": body_html,
+                },
+                timeout=10,
+            )
+            if resp.status_code in (200, 201):
+                print(f"[email] Resend sent to {to_email}: {subject}")
+                return
+            print(f"[email] Resend error {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[email] Resend request error: {e}")
+
+    # ── SMTP fallback (set SMTP_USER + SMTP_PASS in Railway env vars) ──
     if not SMTP_USER or not SMTP_PASS:
-        print(f"[email] SMTP not configured; skipping alert to {to_email}")
+        print(f"[email] No email provider configured; skipping alert to {to_email}")
         return
     try:
         import smtplib
@@ -1617,9 +1643,9 @@ def _send_alert_email(to_email: str, subject: str, body_html: str):
             s.starttls()
             s.login(SMTP_USER, SMTP_PASS)
             s.sendmail(ALERT_EMAIL, [to_email], msg.as_string())
-        print(f"[email] Alert sent to {to_email}: {subject}")
+        print(f"[email] SMTP sent to {to_email}: {subject}")
     except Exception as e:
-        print(f"[email] Send error: {e}")
+        print(f"[email] SMTP error: {e}")
 
 
 def _build_alert_email(shop: str, violations: list, score: int) -> str:
@@ -1749,6 +1775,37 @@ def _run_scheduled_scans():
                         _send_alert_email(shop_email, subject, html)
         except Exception as e:
             print(f"[scheduler] Scan error for {shop}: {e}")
+
+
+@app.route("/api/test-alert", methods=["POST"])
+@require_api_auth
+def api_test_alert():
+    """Send a test compliance alert email to the shop's contact address."""
+    shop  = request.shop
+    token = request.shop_token
+    plan  = request.plan
+    if not plan.get("channels"):
+        return jsonify({"error": "Email alerts require a paid plan"}), 403
+
+    info = _get_shop_info(shop, token)
+    shop_email = info.get("email", "")
+    if not shop_email:
+        return jsonify({"error": "No email address on file for this shop"}), 400
+
+    violations = _db_get_violations(shop, status="open")
+    scan = _db_get_latest_scan(shop)
+    score = scan.get("overall_score", 0) or 0
+
+    if not violations:
+        # Send a "you're compliant" test email so they can verify delivery
+        subject = "SellerShield: Test Alert — Your store is compliant ✅"
+        html = _build_alert_email(shop, [], score)
+    else:
+        subject = f"SellerShield: Test Alert — {len(violations)} issue(s) found"
+        html = _build_alert_email(shop, violations, score)
+
+    _send_alert_email(shop_email, subject, html)
+    return jsonify({"success": True, "sent_to": shop_email})
 
 
 @app.route("/setup-db")
@@ -2225,6 +2282,42 @@ def about():
 <p style="margin-top: 40px;"><a href="/" style="color: #22C55E; font-weight: 700;">&#8592; Run a Free Audit</a></p>
 </div>
 {_footer()}</body></html>"""
+
+
+# ── GDPR Webhooks (required for App Store approval) ───────────────────────
+
+@app.route("/webhooks/customers/data_request", methods=["POST"])
+def gdpr_customer_data_request():
+    """Shopify GDPR: customer requests their data. Acknowledge receipt."""
+    # TODO: email customer data export to shop owner if/when needed
+    return "", 200
+
+
+@app.route("/webhooks/customers/redact", methods=["POST"])
+def gdpr_customer_redact():
+    """Shopify GDPR: redact customer data. SellerShield stores no PII — no-op."""
+    return "", 200
+
+
+@app.route("/webhooks/shop/redact", methods=["POST"])
+def gdpr_shop_redact():
+    """Shopify GDPR: shop uninstalled 48h ago — delete all shop data."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        shop = payload.get("myshopify_domain", "")
+        if shop and DATABASE_URL and psycopg2:
+            with _db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM violations WHERE shop=%s", (shop,))
+                    cur.execute("DELETE FROM fixes WHERE shop=%s", (shop,))
+                    cur.execute("DELETE FROM scans WHERE shop=%s", (shop,))
+                    cur.execute("DELETE FROM shop_plans WHERE shop=%s", (shop,))
+                    cur.execute("DELETE FROM shop_installs WHERE shop=%s", (shop,))
+                conn.commit()
+            print(f"[gdpr] Shop data deleted for {shop}")
+    except Exception as e:
+        print(f"[gdpr] shop/redact error: {e}")
+    return "", 200
 
 
 # ── Startup ────────────────────────────────────────────────────────────────
