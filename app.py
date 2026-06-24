@@ -105,18 +105,33 @@ def _init_db():
                     CREATE TABLE IF NOT EXISTS shop_installs (
                         shop TEXT PRIMARY KEY,
                         access_token TEXT NOT NULL,
+                        refresh_token TEXT,
+                        token_expires_at TIMESTAMPTZ,
                         charge_id BIGINT,
                         charge_status TEXT DEFAULT 'none',
                         installed_at TIMESTAMPTZ DEFAULT NOW(),
                         updated_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                # Safe migration: add columns if they don't exist
+                for col, typedef in [
+                    ("refresh_token", "TEXT"),
+                    ("token_expires_at", "TIMESTAMPTZ"),
+                ]:
+                    cur.execute(f"""
+                        ALTER TABLE shop_installs
+                        ADD COLUMN IF NOT EXISTS {col} {typedef}
+                    """)
             conn.commit()
     except Exception as e:
         print(f"[DB] init error: {e}")
 
 
-def _db_save_token(shop: str, token: str):
+def _db_save_token(shop: str, token: str, refresh_token: str = None, expires_in: int = None):
+    from datetime import datetime, timezone
+    expires_at = None
+    if expires_in:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in) - 300)  # 5-min buffer
     if not DATABASE_URL or not psycopg2:
         _shop_tokens[shop] = token
         return
@@ -124,17 +139,75 @@ def _db_save_token(shop: str, token: str):
         with _db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO shop_installs (shop, access_token, charge_status, updated_at)
-                    VALUES (%s, %s, 'none', NOW())
+                    INSERT INTO shop_installs (shop, access_token, refresh_token, token_expires_at, charge_status, updated_at)
+                    VALUES (%s, %s, %s, %s, 'none', NOW())
                     ON CONFLICT (shop) DO UPDATE SET
                         access_token = EXCLUDED.access_token,
+                        refresh_token = COALESCE(EXCLUDED.refresh_token, shop_installs.refresh_token),
+                        token_expires_at = COALESCE(EXCLUDED.token_expires_at, shop_installs.token_expires_at),
                         charge_status = 'none',
                         updated_at = NOW()
-                """, (shop, token))
+                """, (shop, token, refresh_token, expires_at))
             conn.commit()
     except Exception as e:
         print(f"[DB] save_token error: {e}")
         _shop_tokens[shop] = token
+
+
+def _db_refresh_token(shop: str) -> str:
+    """Refresh an expiring offline token. Returns new access token or empty string."""
+    if not DATABASE_URL or not psycopg2:
+        return ""
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT refresh_token FROM shop_installs WHERE shop=%s", (shop,))
+                row = cur.fetchone()
+        if not row or not row[0]:
+            return ""
+        refresh_token = row[0]
+        resp = http_req.post(
+            f"https://{shop}/admin/oauth/access_token",
+            json={"client_id": SHOPIFY_API_KEY, "client_secret": SHOPIFY_API_SECRET,
+                  "grant_type": "refresh_token", "refresh_token": refresh_token},
+            timeout=10,
+        )
+        print(f"[token-refresh] status={resp.status_code} body={resp.text[:200]}")
+        if resp.status_code == 200:
+            data = resp.json()
+            new_token = data.get("access_token", "")
+            _db_save_token(shop, new_token,
+                           refresh_token=data.get("refresh_token"),
+                           expires_in=data.get("expires_in"))
+            return new_token
+    except Exception as e:
+        print(f"[token-refresh] error: {e}")
+    return ""
+
+
+def _get_valid_token(shop: str) -> str:
+    """Return a valid access token, refreshing if needed."""
+    from datetime import datetime, timezone
+    if not DATABASE_URL or not psycopg2:
+        return _shop_tokens.get(shop, "")
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT access_token, token_expires_at FROM shop_installs WHERE shop=%s", (shop,)
+                )
+                row = cur.fetchone()
+        if not row:
+            return ""
+        token, expires_at = row
+        if expires_at and expires_at < datetime.now(timezone.utc):
+            print(f"[token] expired for {shop}, refreshing...")
+            new_token = _db_refresh_token(shop)
+            return new_token or token
+        return token or ""
+    except Exception as e:
+        print(f"[token] get_valid_token error: {e}")
+        return ""
 
 
 def _db_get_install(shop: str):
@@ -535,7 +608,7 @@ def require_api_auth(f):
         if not install or not install[0]:
             return jsonify({"error": "Shop not authenticated"}), 401
         request.shop = shop
-        request.shop_token = install[0]
+        request.shop_token = _get_valid_token(shop) or install[0]
         request.plan = _db_get_plan(shop)
         return f(*args, **kwargs)
     return decorated
@@ -1690,8 +1763,12 @@ def shopify_callback():
     )
     if token_resp.status_code != 200:
         return f"Token exchange failed: {token_resp.text}", 500
-    access_token = token_resp.json().get("access_token", "")
-    _db_save_token(shop, access_token)
+    token_data   = token_resp.json()
+    access_token = token_data.get("access_token", "")
+    print(f"[auth/callback] token_data keys={list(token_data.keys())} expires_in={token_data.get('expires_in')}")
+    _db_save_token(shop, access_token,
+                   refresh_token=token_data.get("refresh_token"),
+                   expires_in=token_data.get("expires_in"))
     if not SHOPIFY_BILLING_TEST:
         charge_resp = http_req.post(
             f"https://{shop}/admin/api/2024-01/recurring_application_charges.json",
