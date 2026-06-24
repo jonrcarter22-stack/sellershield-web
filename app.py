@@ -1288,7 +1288,7 @@ def _run_scheduled_scans():
                         WHERE shop = sp.shop AND status = 'done'
                         ORDER BY completed_at DESC LIMIT 1
                     ) s ON true
-                    WHERE sp.plan_key != 'free'
+                    WHERE sp.plan_name != 'free'
                 """)
                 rows = cur.fetchall()
     except Exception as e:
