@@ -19,6 +19,11 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, send_file, abort, redirect as flask_redirect, make_response
 import requests as http_req
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
 
 # Add engine directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "engine"))
@@ -27,8 +32,9 @@ from audit_engine import AuditEngine
 from report_generator import generate_pdf
 
 app = Flask(__name__)
+_init_db()
 
-# ââ In-memory audit cache (results live for 2 hours) ââââââââââââââââââââââ
+# ── In-memory audit cache (results live for 2 hours) ──────────────────────
 _cache = {}
 _cache_lock = threading.Lock()
 
@@ -45,20 +51,105 @@ PLATFORM_LABELS = {
     "walmart": "Walmart Marketplace",
 }
 
-# ââ Shopify App Config âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ── Shopify App Config ─────────────────────────────────────────────────────
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY", "")
 SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET", "")
 APP_URL            = os.environ.get("APP_URL", "https://getsellershield.app")
 SHOPIFY_BILLING_TEST = os.environ.get("SHOPIFY_BILLING_TEST", "true").lower() == "true"
+DATABASE_URL       = os.environ.get("DATABASE_URL", "")
 SHOPIFY_SCOPES = (
     "read_products,write_products,read_orders,"
     "read_customers,read_script_tags,write_script_tags"
 )
 
-# In-memory token store â lost on restart; shop re-auths automatically
+# In-memory fallback (used when no DATABASE_URL is set)
 _shop_tokens: dict = {}
 
 CONTACT_EMAIL = "jonrcarter22@gmail.com"
+
+
+# ── Database helpers ───────────────────────────────────────────────────────
+
+def _db_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+
+def _init_db():
+    """Create shop_installs table if it doesn't exist."""
+    if not DATABASE_URL or not psycopg2:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS shop_installs (
+                        shop TEXT PRIMARY KEY,
+                        access_token TEXT NOT NULL,
+                        charge_id BIGINT,
+                        charge_status TEXT DEFAULT 'none',
+                        installed_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] init error: {e}")
+
+
+def _db_save_token(shop: str, token: str):
+    if not DATABASE_URL or not psycopg2:
+        _shop_tokens[shop] = token
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO shop_installs (shop, access_token, charge_status, updated_at)
+                    VALUES (%s, %s, 'none', NOW())
+                    ON CONFLICT (shop) DO UPDATE SET
+                        access_token = EXCLUDED.access_token,
+                        charge_status = 'none',
+                        updated_at = NOW()
+                """, (shop, token))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] save_token error: {e}")
+        _shop_tokens[shop] = token
+
+
+def _db_get_install(shop: str):
+    """Returns (access_token, charge_id, charge_status) or None."""
+    if not DATABASE_URL or not psycopg2:
+        token = _shop_tokens.get(shop, "")
+        # In dev/test mode with no DB, treat any token as active
+        return (token, None, "active") if token else None
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT access_token, charge_id, charge_status FROM shop_installs WHERE shop = %s",
+                    (shop,)
+                )
+                return cur.fetchone()
+    except Exception as e:
+        print(f"[DB] get_install error: {e}")
+        return None
+
+
+def _db_save_charge(shop: str, charge_id, status: str):
+    if not DATABASE_URL or not psycopg2:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE shop_installs
+                    SET charge_id = %s, charge_status = %s, updated_at = NOW()
+                    WHERE shop = %s
+                """, (charge_id, status, shop))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] save_charge error: {e}")
 
 
 def _verify_shopify_hmac(params: dict) -> bool:
@@ -118,14 +209,14 @@ def _result_to_dict(result, audit_id: str) -> dict:
     }
 
 
-# ââ Web Audit Routes âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ── Web Audit Routes ───────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     shop = request.args.get("shop", "")
     host = request.args.get("host", "")
     if shop:
-        # Entry point from Shopify admin â forward to embedded dashboard
+        # Entry point from Shopify admin — forward to embedded dashboard
         return flask_redirect(f"/shopify/dashboard?shop={shop}&host={host}")
     return render_template("index.html", gumroad_url=GUMROAD_URL)
 
@@ -176,7 +267,7 @@ def download_pdf(audit_id):
     return send_file(pdf_path, as_attachment=True, download_name=filename)
 
 
-# ââ Shopify OAuth Routes âââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ── Shopify OAuth Routes ───────────────────────────────────────────────────
 
 @app.route("/shopify/install")
 def shopify_install():
@@ -208,7 +299,7 @@ def shopify_callback():
     if token_resp.status_code != 200:
         return f"Token exchange failed: {token_resp.text}", 500
     access_token = token_resp.json().get("access_token", "")
-    _shop_tokens[shop] = access_token
+    _db_save_token(shop, access_token)
     if not SHOPIFY_BILLING_TEST:
         charge_resp = http_req.post(
             f"https://{shop}/admin/api/2024-01/recurring_application_charges.json",
@@ -226,7 +317,6 @@ def shopify_callback():
             ).get("confirmation_url", "")
             if confirmation_url:
                 return flask_redirect(confirmation_url)
-    # Send back to Shopify admin â use admin.shopify.com format with app handle
     store_name = shop.replace(".myshopify.com", "")
     return flask_redirect(f"https://admin.shopify.com/store/{store_name}/apps/sellershield")
 
@@ -235,15 +325,29 @@ def shopify_callback():
 def billing_callback():
     shop = request.args.get("shop", "")
     charge_id = request.args.get("charge_id", "")
-    token = _shop_tokens.get(shop, "")
-    if not token:
+    install = _db_get_install(shop)
+    if not install:
         return flask_redirect(f"/shopify/install?shop={shop}")
-    http_req.post(
-        f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}/activate.json",
+    token = install[0]
+    # Check current charge status from Shopify before activating
+    status_resp = http_req.get(
+        f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}.json",
         headers={"X-Shopify-Access-Token": token},
-        json={"recurring_application_charge": {"id": charge_id}},
         timeout=10,
     )
+    charge_status = "declined"
+    if status_resp.status_code == 200:
+        charge_status = status_resp.json().get("recurring_application_charge", {}).get("status", "declined")
+    if charge_status == "accepted":
+        activate_resp = http_req.post(
+            f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}/activate.json",
+            headers={"X-Shopify-Access-Token": token},
+            json={"recurring_application_charge": {"id": charge_id}},
+            timeout=10,
+        )
+        if activate_resp.status_code == 200:
+            charge_status = "active"
+    _db_save_charge(shop, charge_id, charge_status)
     store_name = shop.replace(".myshopify.com", "")
     return flask_redirect(f"https://admin.shopify.com/store/{store_name}/apps/sellershield")
 
@@ -254,9 +358,10 @@ def shopify_dashboard():
     if not shop:
         return "Missing shop parameter", 400
     host = request.args.get("host", "")
-    token = _shop_tokens.get(shop, "")
+    install = _db_get_install(shop)
+    token = install[0] if install else ""
     if not token:
-        # No token â use App Bridge to escape the Shopify iframe and trigger OAuth
+        # No token — use App Bridge to escape the Shopify iframe and trigger OAuth
         install_url = f"{APP_URL}/shopify/install?shop={shop}"
         default_host = f"admin.shopify.com/store/{shop.replace('.myshopify.com', '')}"
         computed_host = host or f"{{btoa_placeholder}}"
@@ -283,9 +388,9 @@ p {{ color: #6b7280; font-size: .9rem; margin-bottom: 28px; line-height: 1.5; }}
     var host = "{host}" || btoa("{default_host}");
     var apiKey = "{SHOPIFY_API_KEY}";
 
-    // Called on button click â user gesture allows top-level navigation
+    // Called on button click — user gesture allows top-level navigation
     window.__connectSellerShield = function() {{
-        // Method 1: top-level nav (requires user gesture â guaranteed on click)
+        // Method 1: top-level nav (requires user gesture — guaranteed on click)
         try {{ window.top.location.href = installUrl; return; }} catch(e1) {{}}
 
         // Method 2: App Bridge redirect
@@ -323,6 +428,56 @@ p {{ color: #6b7280; font-size: .9rem; margin-bottom: 28px; line-height: 1.5; }}
             "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
         )
         return resp
+
+    # ── Billing gate (skipped in test mode) ───────────────────────────────
+    if not SHOPIFY_BILLING_TEST:
+        charge_status = install[2] if install else "none"
+        if charge_status != "active":
+            resubscribe_url = f"{APP_URL}/shopify/install?shop={shop}"
+            paywall_html = f"""<!DOCTYPE html>
+<html><head>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<style>
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       display: flex; align-items: center; justify-content: center;
+       min-height: 100vh; background: #f6f6f7; }}
+.card {{ background: #fff; border-radius: 12px; padding: 48px 40px;
+         text-align: center; max-width: 420px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }}
+h2 {{ font-size: 1.25rem; font-weight: 700; color: #1a1a1a; margin-bottom: 10px; }}
+p {{ color: #6b7280; font-size: .9rem; margin-bottom: 28px; line-height: 1.5; }}
+.price {{ font-size: 2rem; font-weight: 800; color: #1a1a1a; margin: 16px 0 4px; }}
+.trial {{ color: #008060; font-weight: 600; font-size: .9rem; margin-bottom: 28px; }}
+.btn {{ display: inline-block; padding: 12px 28px; background: #008060;
+        color: #fff; border: none; border-radius: 6px; font-size: 15px;
+        font-weight: 600; cursor: pointer; text-decoration: none; }}
+.btn:hover {{ background: #006a4d; }}
+</style>
+<script>
+(function() {{
+    var url = "{resubscribe_url}";
+    window.__subscribe = function() {{
+        try {{ window.top.location.href = url; return; }} catch(e) {{}}
+        window.location.href = url;
+    }};
+}})();
+</script>
+</head>
+<body>
+<div class="card">
+  <h2>Subscription Required</h2>
+  <p>Your SellerShield subscription is not active. Subscribe below to run compliance audits and protect your store.</p>
+  <div class="price">$29.99<span style="font-size:1rem;font-weight:400;color:#6b7280">/mo</span></div>
+  <div class="trial">7-day free trial included</div>
+  <button class="btn" onclick="window.__subscribe()">Start Free Trial</button>
+</div>
+</body></html>"""
+            resp = make_response(paywall_html)
+            resp.headers["Content-Security-Policy"] = (
+                "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+            )
+            return resp
+
     resp = make_response(render_template(
         "shopify_dashboard.html",
         shop=shop,
@@ -337,7 +492,7 @@ p {{ color: #6b7280; font-size: .9rem; margin-bottom: 28px; line-height: 1.5; }}
     return resp
 
 
-# ââ Static Pages âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ── Static Pages ───────────────────────────────────────────────────────────
 
 _PAGE_STYLE = """
 <style>
@@ -368,14 +523,14 @@ def _nav():
     return f'<nav><a class="logo" href="/">Seller<span>Shield</span></a><a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></nav>'
 
 def _footer():
-    return f'<footer><p>SellerShield &nbsp;Â·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;Â·&nbsp; <a href="/terms">Terms of Service</a> &nbsp;Â·&nbsp; <a href="/about">About</a></p><p style="margin-top:8px;">Results are informational only. Always verify against official platform documentation.</p></footer>'
+    return f'<footer><p>SellerShield &nbsp;·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms">Terms of Service</a> &nbsp;·&nbsp; <a href="/about">About</a></p><p style="margin-top:8px;">Results are informational only. Always verify against official platform documentation.</p></footer>'
 
 
 @app.route("/privacy")
 def privacy():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Privacy Policy â SellerShield</title>{_PAGE_STYLE}</head>
+<title>Privacy Policy — SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
 <h1>Privacy Policy</h1>
@@ -392,9 +547,9 @@ def privacy():
 <p>Audit results are held in temporary server memory for up to 2 hours, then permanently deleted.</p>
 <h2>Third-Party Services</h2>
 <ul>
-<li><strong>Railway</strong> â cloud hosting provider.</li>
-<li><strong>Gumroad</strong> â payment processor for PDF reports.</li>
-<li><strong>Shopify</strong> â marketplace platform for the SellerShield app.</li>
+<li><strong>Railway</strong> — cloud hosting provider.</li>
+<li><strong>Gumroad</strong> — payment processor for PDF reports.</li>
+<li><strong>Shopify</strong> — marketplace platform for the SellerShield app.</li>
 </ul>
 <h2>Contact</h2>
 <p>For privacy questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></p>
@@ -406,7 +561,7 @@ def privacy():
 def terms():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Terms of Service â SellerShield</title>{_PAGE_STYLE}</head>
+<title>Terms of Service — SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
 <h1>Terms of Service</h1>
@@ -432,7 +587,7 @@ def terms():
 def about():
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>About â SellerShield</title>{_PAGE_STYLE}</head>
+<title>About — SellerShield</title>{_PAGE_STYLE}</head>
 <body>{_nav()}
 <div class="page">
 <h1>About SellerShield</h1>
