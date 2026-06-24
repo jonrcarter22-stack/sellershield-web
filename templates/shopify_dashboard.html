@@ -258,7 +258,7 @@ body {
       <h3>🔒 Upgrade to unlock full compliance</h3>
       <p id="upgrade-text">Upgrade your plan to access auto-fix, more channels, and daily scans.</p>
     </div>
-    <a class="btn btn-secondary" id="upgrade-btn" href="#" target="_top">Upgrade Plan</a>
+    <button class="btn btn-secondary" id="upgrade-btn" onclick="goToPlans()">Upgrade Plan</button>
   </div>
 
   <!-- Stat cards -->
@@ -385,7 +385,6 @@ function loadDashboard() {
     if (planName === "FREE" || planName === "STARTER") {
       var banner = document.getElementById("upgrade-banner");
       banner.style.display = "flex";
-      document.getElementById("upgrade-btn").href = APP_URL + "/shopify/plans?shop=" + SHOP + "&host=" + HOST;
       document.getElementById("upgrade-text").textContent =
         planName === "FREE"
           ? "Free plan: 1 scan/month, Google only. Upgrade to auto-fix violations and scan all channels."
@@ -591,6 +590,13 @@ function loadHistory() {
 // ── Utility ───────────────────────────────────────────────────
 function escHtml(str) {
   return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Plans navigation ──────────────────────────────────────────
+function goToPlans() {
+  var url = APP_URL + "/shopify/plans?shop=" + SHOP + "&host=" + HOST;
+  // Navigate the iframe to plans page (loads within Shopify admin frame)
+  window.location.href = url;
 }
 
 // ── Init ──────────────────────────────────────────────────────
