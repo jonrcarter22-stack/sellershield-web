@@ -263,20 +263,32 @@ def shopify_dashboard():
         html = f"""<!DOCTYPE html>
 <html><head>
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<style>
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       display: flex; align-items: center; justify-content: center;
+       min-height: 100vh; background: #f6f6f7; }}
+.card {{ background: #fff; border-radius: 12px; padding: 48px 40px;
+         text-align: center; max-width: 380px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }}
+h2 {{ font-size: 1.25rem; font-weight: 700; color: #1a1a1a; margin-bottom: 10px; }}
+p {{ color: #6b7280; font-size: .9rem; margin-bottom: 28px; line-height: 1.5; }}
+.btn {{ display: inline-block; padding: 12px 28px; background: #008060;
+        color: #fff; border: none; border-radius: 6px; font-size: 15px;
+        font-weight: 600; cursor: pointer; text-decoration: none; }}
+.btn:hover {{ background: #006a4d; }}
+</style>
 <script>
 (function() {{
     var installUrl = "{install_url}";
     var host = "{host}" || btoa("{default_host}");
     var apiKey = "{SHOPIFY_API_KEY}";
 
-    function redirect() {{
-        // Method 1: top-level navigation â iframe has no sandbox, this works
-        try {{
-            window.top.location.href = installUrl;
-            return;
-        }} catch(e1) {{}}
+    // Called on button click â user gesture allows top-level navigation
+    window.__connectSellerShield = function() {{
+        // Method 1: top-level nav (requires user gesture â guaranteed on click)
+        try {{ window.top.location.href = installUrl; return; }} catch(e1) {{}}
 
-        // Method 2: App Bridge instance dispatch
+        // Method 2: App Bridge redirect
         try {{
             var AppBridge = window["app-bridge"];
             if (AppBridge && AppBridge.actions && AppBridge.actions.Redirect) {{
@@ -288,20 +300,24 @@ def shopify_dashboard():
             }}
         }} catch(e2) {{}}
 
-        // Method 3: postMessage to Shopify admin shell
-        window.parent.postMessage(JSON.stringify({{
-            message: "Shopify.API.remoteRedirect",
-            data: {{ location: installUrl }}
-        }}), "*");
+        // Method 3: navigate iframe (Shopify may intercept to top-level)
+        window.location.href = installUrl;
+    }};
 
-        // Method 4: fallback â navigate iframe itself (OAuth page may break out)
-        setTimeout(function() {{ window.location.href = installUrl; }}, 300);
-    }}
-
-    setTimeout(redirect, 100);
+    // Also attempt auto-redirect on load (works if called with user activation context)
+    window.addEventListener('load', function() {{
+        try {{ window.top.location.href = installUrl; }} catch(e) {{}}
+    }});
 }})();
 </script>
-</head><body><p style="font-family:sans-serif;padding:20px;">Authenticating with SellerShield...</p></body></html>"""
+</head>
+<body>
+<div class="card">
+  <h2>Connect SellerShield</h2>
+  <p>Click below to authenticate your store and get started with compliance auditing.</p>
+  <button class="btn" onclick="window.__connectSellerShield()">Connect SellerShield</button>
+</div>
+</body></html>"""
         resp = make_response(html)
         resp.headers["Content-Security-Policy"] = (
             "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
