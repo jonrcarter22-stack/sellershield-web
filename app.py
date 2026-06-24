@@ -256,26 +256,47 @@ def shopify_dashboard():
     if not token:
         # No token â use App Bridge to escape the Shopify iframe and trigger OAuth
         install_url = f"{APP_URL}/shopify/install?shop={shop}"
-        # Compute a default host if not provided
         default_host = f"admin.shopify.com/store/{shop.replace('.myshopify.com', '')}"
+        computed_host = host or f"{{btoa_placeholder}}"
         html = f"""<!DOCTYPE html>
 <html><head>
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 <script>
 (function() {{
-    var shop = "{shop}";
-    var host = "{host}" || btoa("{default_host}");
     var installUrl = "{install_url}";
-    try {{
-        var AppBridge = window["app-bridge"];
-        var createApp = AppBridge.default || AppBridge.createApp;
-        var app = createApp({{ apiKey: "{SHOPIFY_API_KEY}", host: host }});
-        var Redirect = AppBridge.actions.Redirect;
-        Redirect.create(app, {{ url: installUrl }});
-        Redirect.dispatch(app, Redirect.Action.REMOTE, installUrl);
-    }} catch(e) {{
-        window.top.location.href = installUrl;
+    var host = "{host}" || btoa("{default_host}");
+    var apiKey = "{SHOPIFY_API_KEY}";
+
+    function redirect() {{
+        // Method 1: App Bridge instance dispatch (correct API)
+        try {{
+            var AppBridge = window["app-bridge"];
+            if (AppBridge && AppBridge.actions && AppBridge.actions.Redirect) {{
+                var createApp = AppBridge.default || AppBridge.createApp;
+                var app = createApp({{ apiKey: apiKey, host: host }});
+                var redirect = AppBridge.actions.Redirect.create(app);
+                redirect.dispatch(AppBridge.actions.Redirect.Action.REMOTE, installUrl);
+                return;
+            }}
+        }} catch(e1) {{}}
+
+        // Method 2: postMessage directly to Shopify admin shell
+        try {{
+            window.parent.postMessage(JSON.stringify({{
+                message: "Shopify.API.remoteRedirect",
+                data: {{ location: installUrl }}
+            }}), "*");
+            return;
+        }} catch(e2) {{}}
+
+        // Method 3: top-level nav (works outside iframe)
+        try {{ window.top.location.href = installUrl; }} catch(e3) {{
+            window.location.href = installUrl;
+        }}
     }}
+
+    // Give App Bridge script time to initialize
+    setTimeout(redirect, 200);
 }})();
 </script>
 </head><body><p style="font-family:sans-serif;padding:20px;">Authenticating with SellerShield...</p></body></html>"""
