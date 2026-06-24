@@ -118,7 +118,7 @@ def _result_to_dict(result, audit_id: str) -> dict:
     }
 
 
-# ââ Web Audit Routes âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ââ Web Audit Routes ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.route("/")
 def index():
@@ -226,8 +226,9 @@ def shopify_callback():
             ).get("confirmation_url", "")
             if confirmation_url:
                 return flask_redirect(confirmation_url)
-    # Send back to Shopify admin â Shopify re-embeds our app URL in the iframe
-    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
+    # Send back to Shopify admin â use admin.shopify.com format with app handle
+    store_name = shop.replace(".myshopify.com", "")
+    return flask_redirect(f"https://admin.shopify.com/store/{store_name}/apps/sellershield")
 
 
 @app.route("/billing/callback")
@@ -243,7 +244,8 @@ def billing_callback():
         json={"recurring_application_charge": {"id": charge_id}},
         timeout=10,
     )
-    return flask_redirect(f"https://{shop}/admin/apps/{SHOPIFY_API_KEY}")
+    store_name = shop.replace(".myshopify.com", "")
+    return flask_redirect(f"https://admin.shopify.com/store/{store_name}/apps/sellershield")
 
 
 @app.route("/shopify/dashboard")
@@ -367,7 +369,7 @@ def privacy():
 <ul>
 <li>The store URL you submit for scanning</li>
 <li>Publicly accessible content from that URL</li>
-<li>Your selected marketplace platforms</li>
+<li>Your selected marketplace platforms</i>
 </ul>
 <p>We do <strong>not</strong> collect personal identifiers unless you contact us directly.</p>
 <h2>How We Use Your Data</h2>
