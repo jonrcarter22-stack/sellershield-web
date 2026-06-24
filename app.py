@@ -185,6 +185,20 @@ def _db_refresh_token(shop: str) -> str:
     return ""
 
 
+def _is_token_expiring(shop: str) -> bool:
+    """Returns True if the stored token is the new expiring format."""
+    if not DATABASE_URL or not psycopg2:
+        return False
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT token_expires_at FROM shop_installs WHERE shop=%s", (shop,))
+                row = cur.fetchone()
+        return row is not None and row[0] is not None
+    except Exception:
+        return False
+
+
 def _get_valid_token(shop: str) -> str:
     """Return a valid access token, refreshing if needed."""
     from datetime import datetime, timezone
@@ -1162,6 +1176,13 @@ def api_apply_fix(violation_id):
     # ── Auto fix ──────────────────────────────────────────────────────────
     if fix_type == "auto":
         if rule_id in _POLICY_RULE_MAP:
+            # If token is non-expiring, we can't write pages — need per-user OAuth
+            if not _is_token_expiring(shop):
+                auth_url = (
+                    f"{APP_URL}/shopify/admin-auth"
+                    f"?shop={shop}&violation_id={violation_id}"
+                )
+                return jsonify({"admin_auth_url": auth_url})
             result = _auto_fix_policy_page(shop, token, violation_id, rule_id)
             return jsonify(result)
         return jsonify({"error": f"No auto-fix handler for {rule_id}"}), 400
@@ -1300,9 +1321,27 @@ def shopify_billing_auth():
     return flask_redirect(auth_url)
 
 
+@app.route("/shopify/admin-auth")
+def shopify_admin_auth():
+    """Start per-user OAuth to get a fresh online token for Admin API writes."""
+    shop         = request.args.get("shop", "").strip()
+    violation_id = request.args.get("violation_id", "").strip()
+    if not shop or not violation_id:
+        return "Missing shop or violation_id", 400
+    auth_url = (
+        f"https://{shop}/admin/oauth/authorize"
+        f"?client_id={SHOPIFY_API_KEY}"
+        f"&scope={SHOPIFY_SCOPES}"
+        f"&redirect_uri={APP_URL}/billing/oauth-callback"
+        f"&grant_options%5B%5D=per-user"
+        f"&state=fix:{violation_id}"
+    )
+    return flask_redirect(auth_url)
+
+
 @app.route("/billing/oauth-callback")
 def billing_oauth_callback():
-    """Receive per-user token and immediately create billing subscription."""
+    """Receive per-user token — handles billing upgrades and admin fix operations."""
     shop     = request.args.get("shop", "")
     code     = request.args.get("code", "")
     plan_key = request.args.get("state", "")
@@ -1325,6 +1364,36 @@ def billing_oauth_callback():
     online_token = token_resp.json().get("access_token", "")
     if not online_token:
         return "No access token returned", 500
+
+    store_name = shop.replace(".myshopify.com", "")
+    dashboard_url = f"https://admin.shopify.com/store/{store_name}/apps/sellershield/shopify/dashboard"
+
+    # ── Admin fix flow (state = "fix:<violation_id>") ────────────────────
+    if plan_key.startswith("fix:"):
+        violation_id_str = plan_key[4:]
+        try:
+            violation_id = int(violation_id_str)
+        except ValueError:
+            return flask_redirect(f"{dashboard_url}?fix_result=error&fix_msg=bad+violation+id")
+        # Look up the violation
+        try:
+            with _db_conn() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM violations WHERE id=%s AND shop=%s", (violation_id, shop))
+                    v = cur.fetchone()
+        except Exception as e:
+            return flask_redirect(f"{dashboard_url}?fix_result=error&fix_msg={str(e)[:80]}")
+        if not v:
+            return flask_redirect(f"{dashboard_url}?fix_result=error&fix_msg=violation+not+found")
+        v = dict(v)
+        rule_id = v["rule_id"]
+        if rule_id in _POLICY_RULE_MAP:
+            result = _auto_fix_policy_page(shop, online_token, violation_id, rule_id)
+            if result.get("success"):
+                return flask_redirect(f"{dashboard_url}?fix_result=success&fix_title={result.get('title','')}")
+            else:
+                return flask_redirect(f"{dashboard_url}?fix_result=error&fix_msg={result.get('error','unknown')[:80]}")
+        return flask_redirect(f"{dashboard_url}?fix_result=error&fix_msg=no+handler")
 
     plan_info = PLAN_LIMITS.get(plan_key)
     if not plan_info:
