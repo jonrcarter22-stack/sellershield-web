@@ -262,6 +262,47 @@ body {
   </div>
 
   <!-- Upgrade modal -->
+  <!-- ── Guided Fix Modal ──────────────────────────────────────── -->
+  <div id="guided-fix-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;overflow-y:auto">
+    <div style="background:#fff;border-radius:12px;max-width:680px;margin:40px auto;padding:32px;position:relative">
+      <button onclick="document.getElementById('guided-fix-modal').style.display='none'"
+              style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#637381">✕</button>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-size:28px">📄</span>
+        <h2 id="gfm-title" style="margin:0;font-size:18px;color:#1a1a1a"></h2>
+      </div>
+      <p id="gfm-instructions" style="color:#637381;font-size:14px;margin:0 0 16px"></p>
+
+      <div style="position:relative;margin-bottom:16px">
+        <label style="font-size:12px;font-weight:600;color:#637381;letter-spacing:.5px;text-transform:uppercase">Page Content (HTML)</label>
+        <textarea id="gfm-content" readonly
+                  style="width:100%;height:200px;font-family:monospace;font-size:12px;padding:12px;border:1px solid #dde1e6;border-radius:8px;resize:vertical;background:#f6f7f8;box-sizing:border-box;margin-top:6px;color:#1a1a1a"></textarea>
+        <button id="gfm-copy-btn" onclick="guidedFixCopy()"
+                style="position:absolute;bottom:10px;right:10px;background:#005bd3;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-weight:600">
+          Copy
+        </button>
+      </div>
+
+      <div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#1a3a5c">
+        <strong>Next steps:</strong><br>
+        1. Click <strong>Copy</strong> above to copy the page content<br>
+        2. Click <strong>Open Page Editor</strong> — Shopify's page creator will open<br>
+        3. Set the page title, paste the content, and click <strong>Save</strong>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button onclick="document.getElementById('guided-fix-modal').style.display='none'"
+                style="background:#f1f2f3;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600">
+          Close
+        </button>
+        <a id="gfm-deep-link" href="#" target="_blank"
+           style="background:#008060;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+          Open Page Editor ↗
+        </a>
+      </div>
+    </div>
+  </div>
+
   <div id="upgrade-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;overflow-y:auto">
     <div style="background:#fff;max-width:900px;margin:40px auto;border-radius:12px;padding:32px;position:relative">
       <button onclick="closeUpgradeModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6d7175">✕</button>
@@ -493,7 +534,7 @@ function loadViolations() {
         fixBtn = '<span class="badge badge-success">✓ Fixed</span>' +
                  '<button class="btn btn-danger btn-sm" onclick="revertFix(\'' + v.fix_id + '\',this)">Revert</button>';
       } else if (fixType === "auto") {
-        fixBtn = '<button class="btn btn-primary btn-sm" onclick="applyFix(\'' + v.id + '\',\'' + fixType + '\',this)">⚡ Auto-Fix</button>';
+        fixBtn = '<button class="btn btn-primary btn-sm" onclick="applyFix(\'' + v.id + '\',\'' + fixType + '\',this)">⚡ Generate Fix</button>';
       } else if (fixType === "one_click") {
         fixBtn = '<button class="btn btn-primary btn-sm" onclick="applyFix(\'' + v.id + '\',\'' + fixType + '\',this)">🖱 One-Click Fix</button>';
       } else if (fixType === "guided") {
@@ -518,6 +559,27 @@ function loadViolations() {
   });
 }
 
+// ── Guided fix modal helpers ───────────────────────────────────
+function openGuidedFixModal(title, content, instructions, deepLink) {
+  document.getElementById("gfm-title").textContent = title;
+  document.getElementById("gfm-instructions").textContent = instructions;
+  document.getElementById("gfm-content").value = content;
+  document.getElementById("gfm-deep-link").href = deepLink;
+  document.getElementById("guided-fix-modal").style.display = "block";
+}
+
+function guidedFixCopy() {
+  var ta = document.getElementById("gfm-content");
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try { document.execCommand("copy"); } catch(e) { navigator.clipboard && navigator.clipboard.writeText(ta.value); }
+  var btn = document.getElementById("gfm-copy-btn");
+  var orig = btn.textContent;
+  btn.textContent = "Copied!";
+  btn.style.background = "#008060";
+  setTimeout(function() { btn.textContent = orig; btn.style.background = "#005bd3"; }, 2000);
+}
+
 // ── Apply fix ─────────────────────────────────────────────────
 function applyFix(violationId, fixType, btn) {
   btn.disabled = true;
@@ -525,21 +587,33 @@ function applyFix(violationId, fixType, btn) {
   btn.innerHTML = '<span class="spinner"></span>';
 
   api("POST", "/api/fix/" + violationId, { shop: SHOP }).then(function(d) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+
     if (d.admin_auth_url) {
       // Non-expiring token — redirect through per-user OAuth to get a fresh token
       try { window.top.location.href = d.admin_auth_url; } catch(e) { window.location.href = d.admin_auth_url; }
       return;
     }
+    if (d.guided) {
+      // Smart guided auto-fix: show content modal for merchant to paste
+      openGuidedFixModal(d.title, d.content, d.instructions, d.deep_link);
+      return;
+    }
     if (d.error) {
       toast("Fix failed: " + d.error, "error");
-      btn.disabled = false;
-      btn.innerHTML = orig;
       return;
     }
     if (d.pending) {
-      toast("Guided fix: " + (d.instructions || "Follow the steps in the fix guide."), "", 6000);
-      btn.disabled = false;
-      btn.innerHTML = orig;
+      // Guided/one-click fix with deep link
+      if (d.deep_link) {
+        toast("Follow the steps to fix this issue.", "", 4000);
+        setTimeout(function() {
+          try { window.top.location.href = d.deep_link; } catch(e) { window.open(d.deep_link, "_blank"); }
+        }, 800);
+      } else {
+        toast(d.instructions || "Follow the steps in the fix guide.", "", 6000);
+      }
       return;
     }
     toast("Fix applied successfully!", "success");
