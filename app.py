@@ -575,11 +575,20 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
             scanner = ComplianceScanner(shop, token)
             violations = scanner.run(channels=channels)
 
-        # ── Fallback: URL-based AuditEngine (for web-crawl checks) ──────────
+        # ── Fallback: URL-based AuditEngine (20s hard timeout) ──────────────
         if url:
-            try:
-                engine = AuditEngine(timeout=15)
-                result = engine.audit(url, channels)
+            _audit_result = [None]
+            def _run_audit():
+                try:
+                    engine = AuditEngine(timeout=10)
+                    _audit_result[0] = engine.audit(url, channels)
+                except Exception as e:
+                    print(f"[scan] AuditEngine error: {e}")
+            _audit_thread = threading.Thread(target=_run_audit, daemon=True)
+            _audit_thread.start()
+            _audit_thread.join(timeout=20)  # Hard cap at 20 seconds
+            if _audit_result[0] is not None:
+                result = _audit_result[0]
                 seen_rules = {v["rule_id"] for v in violations}
                 for f in result.all_findings:
                     if f.rule_id not in seen_rules:
@@ -598,8 +607,8 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
                             "fix_type":    _resolve_fix_type(f.rule_id),
                             "fix_details": {"fix_text": f.fix or ""},
                         })
-            except Exception as audit_err:
-                print(f"[scan] AuditEngine fallback error: {audit_err}")
+            else:
+                print("[scan] AuditEngine timed out — using ComplianceScanner results only")
 
         # ── Compute per-channel scores ────────────────────────────────────────
         channel_counts = {}
