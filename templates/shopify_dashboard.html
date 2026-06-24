@@ -730,11 +730,13 @@ function openUpgradeModal() {
       card.style.border = "2px solid #005bd3";
       btn.textContent = "Current plan";
       btn.disabled = true;
+      btn.onclick = null;
     } else if (idx < activeIdx) {
       // Downgrade — muted gray border
       card.style.border = "2px solid #c9cccf";
       btn.textContent = "Downgrade";
       btn.disabled = false;
+      btn.onclick = function() { selectDowngrade(key, btn); };
     } else {
       // Upgrade — restore default brand borders
       if (key === "growth") card.style.border = "2px solid #008060";
@@ -742,6 +744,7 @@ function openUpgradeModal() {
       else card.style.border = "2px solid #e1e3e5";
       btn.textContent = activePlanKey === "free" ? "Start free trial" : "Upgrade";
       btn.disabled = false;
+      btn.onclick = function() { selectPlan(key, btn); };
     }
   });
   document.getElementById("upgrade-modal").style.display = "block";
@@ -749,6 +752,26 @@ function openUpgradeModal() {
 function closeUpgradeModal() {
   document.getElementById("upgrade-modal").style.display = "none";
 }
+function selectDowngrade(planKey, btn) {
+  var label = planKey === "free" ? "Free (cancel subscription)" : planKey.charAt(0).toUpperCase() + planKey.slice(1);
+  if (!confirm("Downgrade to " + label + "? Your current subscription will be cancelled immediately.")) return;
+  if (planKey === "free") {
+    btn.disabled = true;
+    var orig = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span> Cancelling…';
+    api("POST", "/api/plan/cancel", { shop: SHOP }).then(function(d) {
+      if (d.error) { toast("Downgrade failed: " + d.error, "error"); btn.disabled = false; btn.textContent = orig; return; }
+      closeUpgradeModal();
+      toast("Subscription cancelled — you're now on Free.", "success");
+      if (currentPlan) currentPlan.name = "free";
+      loadDashboard();
+    }).catch(function() { toast("Network error.", "error"); btn.disabled = false; btn.textContent = orig; });
+  } else {
+    // Lower paid plan — just go through normal billing flow; Shopify replaces the subscription
+    selectPlan(planKey, btn);
+  }
+}
+
 function selectPlan(planKey, btn) {
   if (planKey === "free") { closeUpgradeModal(); return; }
   btn.disabled = true;
