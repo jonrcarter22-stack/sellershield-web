@@ -731,10 +731,82 @@ _POLICY_TEMPLATES = {
 }
 
 _POLICY_RULE_MAP = {
-    # rule_id → policy key
+    # rule_id → policy template key (auto-creatable pages)
     "POL-001": "privacy", "POL-002": "refund",
     "POL-003": "shipping", "POL-004": "terms",
+    # Amazon / Meta policy rules map to same templates
+    "AMZ-005": "refund",
+    "MET-005": "privacy",
 }
+
+# Deep-link templates for guided fixes (Shopify Admin URLs)
+_GUIDED_DEEP_LINKS = {
+    "PRD-001": lambda shop: f"https://{shop}/admin/products",
+    "PRD-002": lambda shop: f"https://{shop}/admin/products",
+    "PRD-003": lambda shop: f"https://{shop}/admin/products",
+    "PRD-004": lambda shop: f"https://{shop}/admin/products",
+    "PRD-005": lambda shop: f"https://{shop}/admin/products",
+    "AMZ-001": lambda shop: f"https://{shop}/admin/products",
+    "AMZ-002": lambda shop: f"https://{shop}/admin/products",
+    "AMZ-003": lambda shop: f"https://{shop}/admin/products",
+    "AMZ-004": lambda shop: f"https://{shop}/admin/products",
+    "MET-001": lambda shop: f"https://{shop}/admin/products",
+    "MET-002": lambda shop: f"https://facebook.com/policies/commerce/",
+    "MET-003": lambda shop: f"https://{shop}/admin/products",
+    "MET-004": lambda shop: f"https://{shop}/admin/products",
+    "CON-001": lambda shop: f"https://{shop}/admin/settings/general",
+    "CON-002": lambda shop: f"https://{shop}/admin/settings/general",
+}
+
+# One-click fix handlers: rule_id → function(shop, token, violation) → dict
+def _one_click_add_description(shop: str, token: str, v: dict) -> dict:
+    """Add a placeholder description to products that are missing one."""
+    fix_details = v.get("fix_details") or {}
+    affected    = fix_details.get("affected_titles", [])
+    if not affected:
+        return {"success": False, "error": "No affected products identified"}
+
+    # Fetch products and update those with thin descriptions
+    updated, errors = 0, []
+    try:
+        resp = _shopify_api(shop, token, "get", "products.json?limit=250&status=active")
+        if resp.status_code != 200:
+            return {"success": False, "error": "Could not fetch products"}
+        products = resp.json().get("products", [])
+        for p in products:
+            import re
+            plain = re.sub(r"<[^>]+>", " ", p.get("body_html", "") or "").strip()
+            if len(plain.split()) < 20 and p["title"] in affected:
+                # Build a minimal description from available product data
+                vendor = p.get("vendor", "")
+                ptype  = p.get("product_type", "")
+                tags   = p.get("tags", "")
+                stub   = (
+                    f"<p>{p['title']} by {vendor}. " if vendor else f"<p>{p['title']}. "
+                ) + (
+                    f"Category: {ptype}. " if ptype else ""
+                ) + (
+                    f"Tags: {tags}.</p>" if tags else "</p>"
+                ) + (
+                    "<p>Please contact us for more details about this product.</p>"
+                )
+                old_body = p.get("body_html", "")
+                upd = _shopify_api(shop, token, "put", f"products/{p['id']}.json",
+                                   body={"product": {"id": p["id"], "body_html": stub}})
+                if upd.status_code == 200:
+                    updated += 1
+                    _db_save_fix(shop, v["id"], "one_click",
+                                 {"product_id": p["id"], "action": "added_description"},
+                                 {"product_id": p["id"], "old_body": old_body})
+                else:
+                    errors.append(p["title"])
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    if updated:
+        return {"success": True, "updated": updated,
+                "message": f"Added placeholder descriptions to {updated} product(s). Edit them in Shopify Admin for best results."}
+    return {"success": False, "error": f"No products updated. Errors: {errors[:3]}"}
 
 
 def _auto_fix_policy_page(shop: str, token: str, violation_id: int, rule_id: str) -> dict:
@@ -928,21 +1000,61 @@ def api_apply_fix(violation_id):
     if fix_type == "one_click" and not plan.get("one_click_fix"):
         return jsonify({"error": "Upgrade to Growth or higher for one-click fixes", "upgrade": True}), 403
 
-    # Route to correct fix handler
+    rule_id     = v["rule_id"]
+    fix_details = v.get("fix_details") or {}
+
+    # ── Auto fix ──────────────────────────────────────────────────────────
     if fix_type == "auto":
-        rule_id = v["rule_id"]
         if rule_id in _POLICY_RULE_MAP:
             result = _auto_fix_policy_page(shop, token, violation_id, rule_id)
             return jsonify(result)
         return jsonify({"error": f"No auto-fix handler for {rule_id}"}), 400
 
-    elif fix_type in ("one_click", "guided"):
-        # Phase 4 will implement these — return preview data for now
+    # ── One-click fix ─────────────────────────────────────────────────────
+    elif fix_type == "one_click":
+        _one_click_handlers = {
+            "PRD-001": _one_click_add_description,
+        }
+        handler = _one_click_handlers.get(rule_id)
+        if handler:
+            result = handler(shop, token, v)
+            return jsonify(result)
+        # Fallback: treat as guided
+        deep_link = _GUIDED_DEEP_LINKS.get(rule_id, lambda s: f"https://{s}/admin")(shop)
         return jsonify({
             "success": False,
             "pending": True,
-            "message": "One-click and guided fixes coming in the next update",
-            "fix_details": v.get("fix_details", {}),
+            "instructions": fix_details.get("instructions", "Follow the steps in Shopify Admin."),
+            "deep_link": deep_link,
+            "rule_id": rule_id,
+        })
+
+    # ── Guided fix ────────────────────────────────────────────────────────
+    elif fix_type == "guided":
+        deep_link = _GUIDED_DEEP_LINKS.get(rule_id, lambda s: f"https://{s}/admin")(shop)
+        store_name = shop.replace(".myshopify.com", "")
+        # Build embedded admin deep link (works inside Shopify iframe)
+        embedded_link = f"https://admin.shopify.com/store/{store_name}" + \
+                        deep_link.split("/admin")[-1] if "/admin" in deep_link else deep_link
+        return jsonify({
+            "success": False,
+            "pending": True,
+            "instructions": fix_details.get("instructions", "Manual action required."),
+            "deep_link": embedded_link,
+            "rule_id": rule_id,
+            "affected": fix_details.get("affected_titles", []),
+        })
+
+    # ── Flagged (manual review only) ──────────────────────────────────────
+    elif fix_type == "flagged":
+        policy_url = fix_details.get("policy_url", "")
+        return jsonify({
+            "success": False,
+            "pending": True,
+            "instructions": fix_details.get("instructions", "This issue requires manual review."),
+            "policy_url": policy_url,
+            "rule_id": rule_id,
+            "requires_manual_review": True,
         })
 
     return jsonify({"error": "Fix type not supported", "fix_type": fix_type}), 400
