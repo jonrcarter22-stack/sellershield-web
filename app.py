@@ -33,6 +33,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "engine"))
 
 from audit_engine import AuditEngine
 from report_generator import generate_pdf
+try:
+    from compliance_scanner import ComplianceScanner
+except ImportError:
+    ComplianceScanner = None
 
 app = Flask(__name__)
 
@@ -545,39 +549,84 @@ def _resolve_fix_type(rule_id: str) -> str:
 
 
 def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
-    """Run audit and store results. Called in a background thread."""
+    """Run compliance scan and store results. Called in a background thread."""
     try:
         channels = plan.get("channels", ["google"])
-        engine = AuditEngine(timeout=15)
-        result = engine.audit(url, channels)
+        install  = _db_get_install(shop)
+        token    = install[0] if install else None
 
-        scores = {
-            "overall": result.overall_score,
-            "google": None, "amazon": None, "meta": None,
-        }
-        for ps in result.platform_scores:
-            ch = _PLATFORM_TO_CHANNEL.get(ps.platform)
-            if ch and scores.get(ch) is None:
-                scores[ch] = ps.score
+        violations = []
 
-        seen_rules = set()
+        # ── Phase 3: Channel-specific compliance scanner (Shopify API-based) ──
+        if token and ComplianceScanner:
+            scanner = ComplianceScanner(shop, token)
+            violations = scanner.run(channels=channels)
+
+        # ── Fallback: URL-based AuditEngine (for web-crawl checks) ──────────
+        if url:
+            try:
+                engine = AuditEngine(timeout=15)
+                result = engine.audit(url, channels)
+                seen_rules = {v["rule_id"] for v in violations}
+                for f in result.all_findings:
+                    if f.rule_id not in seen_rules:
+                        seen_rules.add(f.rule_id)
+                        ch = _PLATFORM_TO_CHANNEL.get(
+                            next((ps.platform for ps in result.platform_scores
+                                  if any(ff.rule_id == f.rule_id for ff in ps.findings)), "google"),
+                            "google"
+                        )
+                        violations.append({
+                            "rule_id":     f.rule_id,
+                            "channel":     ch,
+                            "severity":    f.severity.lower(),
+                            "title":       f.message,
+                            "description": f.fix or "",
+                            "fix_type":    _resolve_fix_type(f.rule_id),
+                            "fix_details": {"fix_text": f.fix or ""},
+                        })
+            except Exception as audit_err:
+                print(f"[scan] AuditEngine fallback error: {audit_err}")
+
+        # ── Compute per-channel scores ────────────────────────────────────────
+        channel_counts = {}
+        for v in violations:
+            ch = v.get("channel", "google")
+            channel_counts.setdefault(ch, {"critical": 0, "high": 0, "medium": 0, "low": 0})
+            sev = v.get("severity", "low")
+            if sev in channel_counts[ch]:
+                channel_counts[ch][sev] += 1
+
+        def _score_from_counts(counts):
+            deductions = counts.get("critical", 0) * 20 + counts.get("high", 0) * 10 + \
+                         counts.get("medium", 0) * 5  + counts.get("low", 0) * 2
+            return max(0, 100 - deductions)
+
+        scores = {"overall": None, "google": None, "amazon": None, "meta": None}
+        for ch, counts in channel_counts.items():
+            if ch in scores:
+                scores[ch] = _score_from_counts(counts)
+        active_scores = [s for s in [scores["google"], scores["amazon"], scores["meta"]] if s is not None]
+        scores["overall"] = int(sum(active_scores) / len(active_scores)) if active_scores else 100
+
+        # ── Save violations to DB ─────────────────────────────────────────────
         vcount = 0
-        for f in result.all_findings:
-            if f.rule_id in seen_rules:
-                continue
-            seen_rules.add(f.rule_id)
-            channel = "google"  # default; richer mapping comes in Phase 3
-            fix_type = _resolve_fix_type(f.rule_id)
+        for v in violations:
             _db_save_violation(
-                scan_id=scan_id, shop=shop, channel=channel,
-                rule_id=f.rule_id, severity=f.severity.lower(),
-                title=f.message, description=f.fix or "",
-                fix_type=fix_type, fix_details={"fix_text": f.fix or ""},
+                scan_id=scan_id, shop=shop,
+                channel=v.get("channel", "google"),
+                rule_id=v["rule_id"],
+                severity=v.get("severity", "medium"),
+                title=v.get("title", v["rule_id"]),
+                description=v.get("description", ""),
+                fix_type=v.get("fix_type", "guided"),
+                fix_details=v.get("fix_details", {}),
             )
             vcount += 1
 
         _db_complete_scan(scan_id, scores, vcount)
     except Exception as e:
+        print(f"[scan] _run_scan_for_shop error: {e}")
         _db_fail_scan(scan_id, str(e))
 
 
