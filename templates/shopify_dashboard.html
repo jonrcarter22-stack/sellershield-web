@@ -657,7 +657,7 @@ function openUpgradeModal() {
         btn.textContent = "Downgrade";
         btn.disabled = false;
       } else {
-        btn.textContent = "Start free trial";
+        btn.textContent = activePlanKey === "free" ? "Start free trial" : "Upgrade";
         btn.disabled = false;
       }
     }
