@@ -1713,32 +1713,22 @@ def shopify_callback():
 
 @app.route("/billing/callback")
 def billing_callback():
-    shop = request.args.get("shop", "")
-    charge_id = request.args.get("charge_id", "")
-    install = _db_get_install(shop)
-    if not install:
-        return flask_redirect(f"/shopify/install?shop={shop}")
-    token = install[0]
-    # Check current charge status from Shopify before activating
-    status_resp = http_req.get(
-        f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}.json",
-        headers={"X-Shopify-Access-Token": token},
-        timeout=10,
-    )
-    charge_status = "declined"
-    if status_resp.status_code == 200:
-        charge_status = status_resp.json().get("recurring_application_charge", {}).get("status", "declined")
-    if charge_status == "accepted":
-        activate_resp = http_req.post(
-            f"https://{shop}/admin/api/2024-01/recurring_application_charges/{charge_id}/activate.json",
-            headers={"X-Shopify-Access-Token": token},
-            json={"recurring_application_charge": {"id": charge_id}},
-            timeout=10,
-        )
-        if activate_resp.status_code == 200:
-            charge_status = "active"
-    _db_save_charge(shop, charge_id, charge_status)
+    """Shopify redirects here after merchant approves a subscription."""
+    shop      = request.args.get("shop", "")
+    plan_key  = request.args.get("plan", "").lower()
+    charge_id = request.args.get("charge_id", "")  # subscription GID from Shopify
+
+    if not shop:
+        return "Missing shop", 400
+
     store_name = shop.replace(".myshopify.com", "")
+
+    if plan_key and plan_key in PLAN_LIMITS:
+        _db_set_plan(shop, plan_key, charge_id or None)
+        print(f"[billing/callback] plan set to {plan_key} for {shop} (charge={charge_id})")
+    else:
+        print(f"[billing/callback] unknown plan '{plan_key}' for {shop} — not updating DB")
+
     return flask_redirect(f"https://admin.shopify.com/store/{store_name}/apps/sellershield")
 
 
