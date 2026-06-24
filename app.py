@@ -1226,27 +1226,52 @@ def api_plan_upgrade():
         return jsonify({"success": True, "plan": new_plan_key})
 
     plan_info = PLAN_LIMITS[new_plan_key]
-    charge_body = {
-        "recurring_application_charge": {
-            "name":       f"SellerShield {plan_info['name']}",
-            "price":      price,
-            "return_url": f"{APP_URL}/billing/callback?shop={shop}&plan={new_plan_key}",
-            "test":       SHOPIFY_BILLING_TEST,
-            "trial_days": 7,
-        }
+    return_url = f"{APP_URL}/billing/callback?shop={shop}&plan={new_plan_key}"
+
+    # Use GraphQL appSubscriptionCreate (works for all app types)
+    gql_query = """
+mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $trialDays: Int, $lineItems: [AppSubscriptionLineItemInput!]!) {
+  appSubscriptionCreate(name: $name, returnUrl: $returnUrl, test: $test, trialDays: $trialDays, lineItems: $lineItems) {
+    userErrors { field message }
+    confirmationUrl
+    appSubscription { id }
+  }
+}
+"""
+    gql_vars = {
+        "name":       f"SellerShield {plan_info['name']}",
+        "returnUrl":  return_url,
+        "test":       bool(SHOPIFY_BILLING_TEST),
+        "trialDays":  7,
+        "lineItems":  [{
+            "plan": {
+                "appRecurringPricingDetails": {
+                    "price":    {"amount": str(price), "currencyCode": "USD"},
+                    "interval": "EVERY_30_DAYS"
+                }
+            }
+        }]
     }
     resp = http_req.post(
-        f"https://{shop}/admin/api/2024-01/recurring_application_charges.json",
-        headers={"X-Shopify-Access-Token": token},
-        json=charge_body, timeout=10,
+        f"https://{shop}/admin/api/2024-01/graphql.json",
+        headers={
+            "X-Shopify-Access-Token": token,
+            "Content-Type": "application/json",
+        },
+        json={"query": gql_query, "variables": gql_vars},
+        timeout=10,
     )
-    if resp.status_code == 201:
-        confirmation_url = resp.json().get(
-            "recurring_application_charge", {}
-        ).get("confirmation_url", "")
-        return jsonify({"confirmation_url": confirmation_url})
+    if resp.status_code == 200:
+        body = resp.json()
+        sub_data = body.get("data", {}).get("appSubscriptionCreate", {})
+        errors = sub_data.get("userErrors", [])
+        if errors:
+            return jsonify({"error": f"Billing error: {errors[0].get('message', 'Unknown')}"}), 500
+        confirmation_url = sub_data.get("confirmationUrl", "")
+        if confirmation_url:
+            return jsonify({"confirmation_url": confirmation_url})
 
-    return jsonify({"error": f"Billing API error: {resp.text[:200]}"}), 500
+    return jsonify({"error": f"Billing API error: {resp.text[:300]}"}), 500
 
 
 @app.route("/shopify/plans")
