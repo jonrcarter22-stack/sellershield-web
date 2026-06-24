@@ -442,7 +442,7 @@ function loadViolations() {
       var fixType = v.fix_type || "flagged";
 
       var fixBtn = "";
-      if (locked) {
+      if (locked || fixType === "locked") {
         fixBtn = '<span class="locked-badge">🔒 Upgrade to fix</span>';
       } else if (v.status === "resolved") {
         fixBtn = '<span class="badge badge-success">✓ Fixed</span>' +
