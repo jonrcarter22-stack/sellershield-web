@@ -1,183 +1,602 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SellerShield — Shopify Dashboard</title>
-  <script src="https://unpkg.com/@shopify/app-bridge@3" crossorigin="anonymous"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #F6F6F7; color: #202223; min-height: 100vh; padding: 24px;
-    }
-    .header {
-      display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
-    }
-    .logo { font-size: 1.5rem; font-weight: 800; color: #111; }
-    .logo span { color: #22C55E; }
-    .badge {
-      background: #22C55E; color: #fff; font-size: .7rem; font-weight: 700;
-      padding: 3px 8px; border-radius: 99px; text-transform: uppercase;
-    }
-    .card {
-      background: #fff; border-radius: 12px; padding: 28px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px;
-    }
-    .card h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 12px; color: #111; }
-    .card p { color: #6B7280; line-height: 1.6; margin-bottom: 8px; }
-    .score-row { display: flex; align-items: center; gap: 16px; margin: 16px 0; }
-    .score-circle {
-      width: 80px; height: 80px; border-radius: 50%;
-      background: conic-gradient(#22C55E 0% 0%, #E5E7EB 0% 100%);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.4rem; font-weight: 800; color: #111;
-      border: 4px solid #22C55E; flex-shrink: 0;
-    }
-    .audit-url { font-size: .85rem; color: #6B7280; margin-bottom: 4px; }
-    .btn {
-      display: inline-block; background: #111; color: #fff; padding: 10px 20px;
-      border-radius: 8px; font-weight: 600; font-size: .9rem; border: none;
-      cursor: pointer; text-decoration: none; margin-top: 8px;
-    }
-    .btn:hover { background: #333; }
-    .btn-green { background: #22C55E; }
-    .btn-green:hover { background: #16A34A; }
-    .platform-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;
-      margin-top: 12px;
-    }
-    .platform-card {
-      border: 1px solid #E5E7EB; border-radius: 8px; padding: 14px;
-    }
-    .platform-name { font-weight: 600; font-size: .85rem; margin-bottom: 4px; }
-    .platform-score { font-size: 1.1rem; font-weight: 800; color: #22C55E; }
-    .platform-score.warn { color: #F59E0B; }
-    .platform-score.danger { color: #EF4444; }
-    .steps { counter-reset: steps; }
-    .step {
-      display: flex; gap: 12px; margin-bottom: 16px;
-      padding-bottom: 16px; border-bottom: 1px solid #F3F4F6;
-    }
-    .step:last-child { border-bottom: none; margin-bottom: 0; }
-    .step-num {
-      width: 28px; height: 28px; border-radius: 50%; background: #111;
-      color: #fff; font-weight: 700; font-size: .8rem; display: flex;
-      align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px;
-    }
-    .step-content h3 { font-size: .95rem; font-weight: 600; margin-bottom: 4px; }
-    .step-content p { font-size: .85rem; color: #6B7280; }
-    #audit-form { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-    #audit-url-input {
-      flex: 1; min-width: 200px; padding: 10px 14px; border: 1px solid #D1D5DB;
-      border-radius: 8px; font-size: .9rem;
-    }
-    #audit-status { margin-top: 12px; color: #6B7280; font-size: .9rem; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SellerShield — Compliance Monitor</title>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+/* ── Polaris-inspired design tokens ─────────────────────────── */
+:root {
+  --p-color-bg:              #f6f6f7;
+  --p-color-bg-surface:      #ffffff;
+  --p-color-bg-surface-secondary: #f1f2f4;
+  --p-color-bg-fill-success: #1a9e6e;
+  --p-color-bg-fill-warning: #e08600;
+  --p-color-bg-fill-critical:#d72c0d;
+  --p-color-bg-fill-info:    #0070f3;
+  --p-color-bg-fill-brand:   #008060;
+  --p-color-border:          #e1e3e5;
+  --p-color-border-secondary:#c9cccf;
+  --p-color-text:            #202223;
+  --p-color-text-secondary:  #6d7175;
+  --p-color-text-success:    #0d7a5f;
+  --p-color-text-warning:    #7a4100;
+  --p-color-text-critical:   #a21c00;
+  --p-color-text-brand:      #008060;
+  --p-color-icon-success:    #1a9e6e;
+  --p-color-icon-warning:    #e08600;
+  --p-color-icon-critical:   #d72c0d;
+  --p-shadow-card:           0 1px 0 rgba(0,0,0,.05), 0 0 0 1px rgba(0,0,0,.07);
+  --p-border-radius-200:     8px;
+  --p-border-radius-100:     4px;
+  --p-space-100: 4px;
+  --p-space-200: 8px;
+  --p-space-300: 12px;
+  --p-space-400: 16px;
+  --p-space-500: 20px;
+  --p-space-600: 24px;
+  --p-space-800: 32px;
+  --p-font-size-300: 13px;
+  --p-font-size-350: 14px;
+  --p-font-size-400: 16px;
+  --p-font-size-600: 20px;
+  --p-font-size-750: 24px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--p-font-size-350);
+  background: var(--p-color-bg);
+  color: var(--p-color-text);
+  min-height: 100vh;
+}
+
+/* ── Layout ─────────────────────────────────────────────────── */
+.page { max-width: 960px; margin: 0 auto; padding: var(--p-space-600) var(--p-space-600) 80px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--p-space-600); flex-wrap: wrap; gap: var(--p-space-300); }
+.page-title { font-size: var(--p-font-size-750); font-weight: 700; color: var(--p-color-text); }
+.page-subtitle { color: var(--p-color-text-secondary); font-size: var(--p-font-size-300); margin-top: 2px; }
+
+/* ── Cards ──────────────────────────────────────────────────── */
+.card {
+  background: var(--p-color-bg-surface);
+  border-radius: var(--p-border-radius-200);
+  box-shadow: var(--p-shadow-card);
+  padding: var(--p-space-600);
+  margin-bottom: var(--p-space-500);
+}
+.card-title {
+  font-size: var(--p-font-size-400);
+  font-weight: 600;
+  margin-bottom: var(--p-space-400);
+  color: var(--p-color-text);
+}
+.card-section { border-top: 1px solid var(--p-color-border); margin-top: var(--p-space-400); padding-top: var(--p-space-400); }
+
+/* ── Stat grid ──────────────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--p-space-400); margin-bottom: var(--p-space-500); }
+.stat-card {
+  background: var(--p-color-bg-surface);
+  border-radius: var(--p-border-radius-200);
+  box-shadow: var(--p-shadow-card);
+  padding: var(--p-space-500);
+}
+.stat-label { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-bottom: var(--p-space-100); }
+.stat-value { font-size: 28px; font-weight: 700; color: var(--p-color-text); line-height: 1; }
+.stat-value.success { color: var(--p-color-text-success); }
+.stat-value.warning { color: var(--p-color-text-warning); }
+.stat-value.critical { color: var(--p-color-text-critical); }
+
+/* ── Score ring ─────────────────────────────────────────────── */
+.score-card { display: flex; align-items: center; gap: var(--p-space-800); }
+.score-ring-wrap { flex-shrink: 0; }
+.score-ring { width: 120px; height: 120px; transform: rotate(-90deg); }
+.score-ring circle { fill: none; stroke-width: 10; stroke-linecap: round; }
+.score-ring .track { stroke: var(--p-color-border); }
+.score-ring .fill  { stroke: var(--p-color-bg-fill-success); transition: stroke-dashoffset .6s ease; }
+.score-center { position: relative; text-align: center; margin-top: -120px; height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.score-number { font-size: 32px; font-weight: 800; }
+.score-grade  { font-size: 14px; font-weight: 600; color: var(--p-color-text-secondary); }
+.score-details { flex: 1; }
+.score-details h3 { font-size: var(--p-font-size-600); font-weight: 700; margin-bottom: var(--p-space-200); }
+.score-details p  { color: var(--p-color-text-secondary); line-height: 1.6; margin-bottom: var(--p-space-400); }
+
+/* ── Badges ─────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.badge-critical { background: #fdf0ef; color: var(--p-color-text-critical); }
+.badge-warning  { background: #fff5e9; color: var(--p-color-text-warning); }
+.badge-info     { background: #e8f4fd; color: #004e8c; }
+.badge-success  { background: #e3f5ef; color: var(--p-color-text-success); }
+.badge-neutral  { background: var(--p-color-bg-surface-secondary); color: var(--p-color-text-secondary); }
+.badge-plan     { background: #f3f0ff; color: #6d28d9; }
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: var(--p-border-radius-100);
+  font-size: var(--p-font-size-350); font-weight: 600;
+  cursor: pointer; border: 1px solid transparent;
+  text-decoration: none; transition: all .15s;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary   { background: var(--p-color-bg-fill-brand); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #006a4d; }
+.btn-secondary { background: #fff; color: var(--p-color-text); border-color: var(--p-color-border-secondary); }
+.btn-secondary:hover:not(:disabled) { background: var(--p-color-bg-surface-secondary); }
+.btn-danger    { background: #fff; color: var(--p-color-text-critical); border-color: #fca5a5; }
+.btn-danger:hover:not(:disabled) { background: #fdf0ef; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-icon { padding: 6px; border-radius: var(--p-border-radius-100); }
+
+/* ── Violations table ────────────────────────────────────────── */
+.violations-table { width: 100%; border-collapse: collapse; }
+.violations-table th {
+  text-align: left; padding: var(--p-space-300) var(--p-space-400);
+  font-size: 12px; font-weight: 600; color: var(--p-color-text-secondary);
+  text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid var(--p-color-border);
+}
+.violations-table td {
+  padding: var(--p-space-400);
+  border-bottom: 1px solid var(--p-color-border);
+  vertical-align: top;
+}
+.violations-table tr:last-child td { border-bottom: none; }
+.violations-table tr:hover td { background: var(--p-color-bg-surface-secondary); }
+.violation-title { font-weight: 600; margin-bottom: 2px; }
+.violation-desc  { font-size: 12px; color: var(--p-color-text-secondary); line-height: 1.5; }
+.violation-rule  { font-size: 11px; color: var(--p-color-text-secondary); font-family: monospace; }
+.fix-actions { display: flex; gap: var(--p-space-200); align-items: center; flex-wrap: wrap; }
+
+/* ── History list ────────────────────────────────────────────── */
+.history-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--p-space-400) 0;
+  border-bottom: 1px solid var(--p-color-border);
+  gap: var(--p-space-400);
+}
+.history-item:last-child { border-bottom: none; }
+.history-meta  { font-size: 12px; color: var(--p-color-text-secondary); }
+.history-score { font-size: 20px; font-weight: 700; }
+
+/* ── Plan banner ─────────────────────────────────────────────── */
+.plan-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--p-space-400); flex-wrap: wrap;
+  background: linear-gradient(135deg, #f0fdf9, #e3f5ef);
+  border: 1px solid #a7f3d0;
+  border-radius: var(--p-border-radius-200);
+  padding: var(--p-space-500) var(--p-space-600);
+  margin-bottom: var(--p-space-500);
+}
+.plan-banner.upgrade { background: linear-gradient(135deg, #fdf0ef, #fff5e9); border-color: #fca5a5; }
+.plan-banner-text h3 { font-size: var(--p-font-size-400); font-weight: 700; margin-bottom: 4px; }
+.plan-banner-text p  { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); }
+
+/* ── Toast ───────────────────────────────────────────────────── */
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--p-color-text); color: #fff;
+  padding: 12px 20px; border-radius: var(--p-border-radius-100);
+  font-size: var(--p-font-size-350); font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  animation: slideIn .2s ease;
+  max-width: 320px;
+}
+.toast.success { background: var(--p-color-bg-fill-success); }
+.toast.error   { background: var(--p-color-bg-fill-critical); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ── Spinner ─────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+  border-radius: 50%; animation: spin .7s linear infinite;
+}
+.spinner.dark { border-color: rgba(0,0,0,.1); border-top-color: var(--p-color-text); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Empty states ────────────────────────────────────────────── */
+.empty-state { text-align: center; padding: var(--p-space-800) var(--p-space-600); }
+.empty-state-icon { font-size: 40px; margin-bottom: var(--p-space-400); }
+.empty-state h3  { font-size: var(--p-font-size-400); font-weight: 600; margin-bottom: var(--p-space-200); }
+.empty-state p   { color: var(--p-color-text-secondary); margin-bottom: var(--p-space-600); }
+
+/* ── Loading skeleton ────────────────────────────────────────── */
+.skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 4px; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ── Locked overlay ──────────────────────────────────────────── */
+.locked-row td { opacity: .5; }
+.locked-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--p-color-text-secondary); }
+
+/* ── Channel tabs ────────────────────────────────────────────── */
+.channel-tabs { display: flex; gap: 2px; background: var(--p-color-bg-surface-secondary); border-radius: var(--p-border-radius-100); padding: 2px; margin-bottom: var(--p-space-400); }
+.channel-tab  {
+  flex: 1; text-align: center; padding: 6px 12px; border-radius: 3px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--p-color-text-secondary); border: none; background: transparent;
+  transition: all .15s;
+}
+.channel-tab.active { background: #fff; color: var(--p-color-text); box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .page { padding: var(--p-space-400); }
+  .score-card { flex-direction: column; align-items: flex-start; }
+  .violations-table th:nth-child(3),
+  .violations-table td:nth-child(3) { display: none; }
+}
+</style>
 </head>
 <body>
+<div class="page">
 
-<div class="header">
-  <div class="logo">Seller<span>Shield</span></div>
-  <span class="badge">Shopify App</span>
-</div>
-
-<div class="card">
-  <h2>Run a Compliance Audit</h2>
-  <p>Enter your store URL to scan it against Amazon, Google, Meta, TikTok, and Walmart marketplace rules.</p>
-  <div id="audit-form">
-    <input id="audit-url-input" type="url" placeholder="https://yourstore.com" value="https://{{ shop }}">
-    <button class="btn btn-green" onclick="runAudit()">Run Audit →</button>
-  </div>
-  <div id="audit-status"></div>
-</div>
-
-<div id="results-card" style="display:none;" class="card">
-  <h2>Audit Results</h2>
-  <div class="score-row">
-    <div class="score-circle" id="score-circle">—</div>
+  <!-- Page header -->
+  <div class="page-header">
     <div>
-      <div class="audit-url" id="result-url"></div>
-      <div style="font-size:1.2rem;font-weight:800;" id="result-grade"></div>
-      <div style="font-size:.85rem;color:#6B7280;" id="result-summary"></div>
+      <div class="page-title">Compliance Monitor</div>
+      <div class="page-subtitle" id="shop-label">{{ shop }}</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="badge badge-plan" id="plan-badge">Loading plan…</span>
+      <button class="btn btn-primary" id="scan-btn" onclick="runScan()">
+        <span id="scan-btn-text">▶ Run Scan</span>
+      </button>
     </div>
   </div>
-  <div class="platform-grid" id="platform-grid"></div>
+
+  <!-- Plan banner (shown for free/starter) -->
+  <div class="plan-banner upgrade" id="upgrade-banner" style="display:none">
+    <div class="plan-banner-text">
+      <h3>🔒 Upgrade to unlock full compliance</h3>
+      <p id="upgrade-text">Upgrade your plan to access auto-fix, more channels, and daily scans.</p>
+    </div>
+    <a class="btn btn-secondary" id="upgrade-btn" href="#" target="_top">Upgrade Plan</a>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="stat-grid" id="stat-grid">
+    <div class="stat-card"><div class="stat-label">Overall Score</div><div class="stat-value" id="stat-score"><span class="skeleton" style="width:48px;height:28px;display:block"></span></div></div>
+    <div class="stat-card"><div class="stat-label">Critical Issues</div><div class="stat-value critical" id="stat-critical"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
+    <div class="stat-card"><div class="stat-label">Warnings</div><div class="stat-value warning" id="stat-warnings"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
+    <div class="stat-card"><div class="stat-label">Scans This Month</div><div class="stat-value" id="stat-scans"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
+    <div class="stat-card"><div class="stat-label">Auto-Fixed</div><div class="stat-value success" id="stat-fixed"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
+  </div>
+
+  <!-- Violations -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div class="card-title" style="margin-bottom:0">Violations</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="severity-filter" class="btn btn-secondary btn-sm" style="font-weight:500" onchange="loadViolations()">
+          <option value="">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select id="status-filter" class="btn btn-secondary btn-sm" style="font-weight:500" onchange="loadViolations()">
+          <option value="open">Open</option>
+          <option value="fixed">Fixed</option>
+          <option value="">All</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Channel tabs -->
+    <div class="channel-tabs" id="channel-tabs"></div>
+
+    <div id="violations-container">
+      <div class="empty-state">
+        <div class="spinner dark" style="width:24px;height:24px;margin:0 auto 16px"></div>
+        <p>Loading violations…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent scans history -->
+  <div class="card">
+    <div class="card-title">Recent Scans</div>
+    <div id="history-container">
+      <div class="empty-state"><div class="spinner dark" style="width:24px;height:24px;margin:0 auto 16px"></div><p>Loading history…</p></div>
+    </div>
+  </div>
+
 </div>
 
-<div class="card">
-  <h2>How It Works</h2>
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">1</div>
-      <div class="step-content">
-        <h3>Enter your store URL</h3>
-        <p>We'll crawl your public-facing pages and check them against real marketplace policy rules.</p>
-      </div>
-    </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <div class="step-content">
-        <h3>Get your compliance score</h3>
-        <p>See your overall score, platform-by-platform breakdown, and which issues need fixing.</p>
-      </div>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <div class="step-content">
-        <h3>Get the full PDF fix guide</h3>
-        <p>The paid PDF report ($49) gives you step-by-step fix instructions for every finding.</p>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
 
 <script>
-async function runAudit() {
-  const url = document.getElementById('audit-url-input').value.trim();
-  if (!url) return;
-  const status = document.getElementById('audit-status');
-  document.getElementById('results-card').style.display = 'none';
-  status.textContent = 'Scanning... this takes 15–30 seconds.';
+// ── Config injected by Flask ──────────────────────────────────
+var SHOP    = "{{ shop }}";
+var HOST    = "{{ host }}";
+var APP_URL = "{{ app_url }}";
+var API_KEY = "{{ api_key }}";
 
-  try {
-    const resp = await fetch('{{ app_url }}/audit', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, platforms: 'google,amazon,tiktok,meta,walmart'})
-    });
-    const data = await resp.json();
-    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
-
-    status.textContent = '';
-    const score = data.overall_score || 0;
-    const circle = document.getElementById('score-circle');
-    circle.textContent = score;
-    const pct = score + '%';
-    const color = score >= 75 ? '#22C55E' : score >= 50 ? '#F59E0B' : '#EF4444';
-    circle.style.background = 'conic-gradient(' + color + ' 0% ' + pct + ', #E5E7EB ' + pct + ' 100%)';
-    circle.style.borderColor = color;
-
-    document.getElementById('result-url').textContent = data.url;
-    document.getElementById('result-grade').textContent = 'Grade: ' + (data.overall_grade || '—');
-    document.getElementById('result-summary').textContent =
-      (data.suspension_count || 0) + ' suspension risks · ' +
-      (data.all_findings?.length || 0) + ' total issues';
-
-    const grid = document.getElementById('platform-grid');
-    grid.innerHTML = '';
-    (data.platforms || []).forEach(p => {
-      const cls = p.score >= 75 ? '' : p.score >= 50 ? 'warn' : 'danger';
-      grid.innerHTML += '<div class="platform-card"><div class="platform-name">' + p.name + '</div>' +
-        '<div class="platform-score ' + cls + '">' + p.score + '</div></div>';
-    });
-
-    document.getElementById('results-card').style.display = 'block';
-  } catch(e) {
-    status.textContent = 'Request failed. Please try again.';
+// ── App Bridge init ───────────────────────────────────────────
+var appBridge = null;
+try {
+  var AppBridge = window["app-bridge"];
+  if (AppBridge) {
+    var createApp = AppBridge.default || AppBridge.createApp;
+    appBridge = createApp({ apiKey: API_KEY, host: HOST });
   }
-}
-</script>
+} catch(e) {}
 
+// ── State ─────────────────────────────────────────────────────
+var currentPlan  = null;
+var allChannels  = ["google"];
+var activeChannel = "all";
+var currentScanId = null;
+var scanPollInterval = null;
+
+// ── API helper ────────────────────────────────────────────────
+function api(method, path, body) {
+  var opts = {
+    method: method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Shop-Domain": SHOP
+    }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(APP_URL + path, opts).then(function(r) { return r.json(); });
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function toast(msg, type, duration) {
+  var t = document.createElement("div");
+  t.className = "toast " + (type || "");
+  t.textContent = msg;
+  document.getElementById("toast-container").appendChild(t);
+  setTimeout(function() { t.remove(); }, duration || 3500);
+}
+
+// ── Load dashboard ────────────────────────────────────────────
+function loadDashboard() {
+  api("GET", "/api/dashboard").then(function(d) {
+    if (d.error) return;
+
+    // Stats
+    var score = d.overall_score || 0;
+    var grade = d.overall_grade || "—";
+    document.getElementById("stat-score").textContent = score + " (" + grade + ")";
+    document.getElementById("stat-score").className = "stat-value " + (score >= 80 ? "success" : score >= 60 ? "warning" : "critical");
+    document.getElementById("stat-critical").textContent = d.by_severity && d.by_severity.critical != null ? d.by_severity.critical : 0;
+    document.getElementById("stat-warnings").textContent = (d.by_severity && d.by_severity.high != null ? d.by_severity.high : 0);
+    document.getElementById("stat-scans").textContent = d.scans_this_month || 0;
+    document.getElementById("stat-fixed").textContent = d.fixed_count || 0;
+
+    // Plan
+    var plan = d.plan || {};
+    currentPlan = plan;
+    var planName = (plan.name || "Free").toUpperCase();
+    document.getElementById("plan-badge").textContent = "📋 " + planName;
+
+    // Upgrade banner
+    if (planName === "FREE" || planName === "STARTER") {
+      var banner = document.getElementById("upgrade-banner");
+      banner.style.display = "flex";
+      document.getElementById("upgrade-text").textContent =
+        planName === "FREE"
+          ? "Free plan: 1 scan/month, Google only. Upgrade to auto-fix violations and scan all channels."
+          : "Starter plan: Google only. Upgrade to Growth to add Amazon & Meta + one-click fixes.";
+    }
+
+    // Channels from plan
+    if (plan.channels) {
+      allChannels = plan.channels;
+      renderChannelTabs();
+    }
+  }).catch(function() {});
+}
+
+// ── Channel tabs ──────────────────────────────────────────────
+function renderChannelTabs() {
+  var tabs = document.getElementById("channel-tabs");
+  var channels = ["all"].concat(allChannels);
+  var labels = { all: "All", google: "Google", amazon: "Amazon", meta: "Meta" };
+  tabs.innerHTML = channels.map(function(ch) {
+    return '<button class="channel-tab' + (ch === activeChannel ? " active" : "") +
+           '" onclick="setChannel(\'' + ch + '\')">' + (labels[ch] || ch) + '</button>';
+  }).join("");
+}
+
+function setChannel(ch) {
+  activeChannel = ch;
+  renderChannelTabs();
+  loadViolations();
+}
+
+// ── Load violations ───────────────────────────────────────────
+function loadViolations() {
+  var severity = document.getElementById("severity-filter").value;
+  var status   = document.getElementById("status-filter").value;
+  var params   = new URLSearchParams({ shop: SHOP });
+  if (severity) params.set("severity", severity);
+  if (status)   params.set("status", status);
+  if (activeChannel && activeChannel !== "all") params.set("channel", activeChannel);
+
+  var container = document.getElementById("violations-container");
+  container.innerHTML = '<div class="empty-state"><div class="spinner dark" style="width:20px;height:20px;margin:0 auto 12px"></div><p>Loading…</p></div>';
+
+  api("GET", "/api/violations?" + params.toString()).then(function(d) {
+    var violations = d.violations || [];
+    if (!violations.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✅</div><h3>No violations found</h3><p>Run a scan to check your compliance status.</p><button class="btn btn-primary" onclick="runScan()">▶ Run Scan</button></div>';
+      return;
+    }
+    var html = '<table class="violations-table"><thead><tr><th>Issue</th><th>Severity</th><th>Channel</th><th>Actions</th></tr></thead><tbody>';
+    violations.forEach(function(v) {
+      var locked  = v._locked;
+      var sev     = v.severity || "info";
+      var badgeClass = sev === "critical" ? "badge-critical" : sev === "high" ? "badge-warning" : sev === "medium" ? "badge-info" : "badge-neutral";
+      var fixType = v.fix_type || "flagged";
+
+      var fixBtn = "";
+      if (locked) {
+        fixBtn = '<span class="locked-badge">🔒 Upgrade to fix</span>';
+      } else if (v.status === "fixed") {
+        fixBtn = '<span class="badge badge-success">✓ Fixed</span>' +
+                 '<button class="btn btn-danger btn-sm" onclick="revertFix(\'' + v.fix_id + '\',this)">Revert</button>';
+      } else if (fixType === "auto") {
+        fixBtn = '<button class="btn btn-primary btn-sm" onclick="applyFix(\'' + v.id + '\',\'' + fixType + '\',this)">⚡ Auto-Fix</button>';
+      } else if (fixType === "one_click") {
+        fixBtn = '<button class="btn btn-primary btn-sm" onclick="applyFix(\'' + v.id + '\',\'' + fixType + '\',this)">🖱 One-Click Fix</button>';
+      } else if (fixType === "guided") {
+        fixBtn = '<button class="btn btn-secondary btn-sm" onclick="applyFix(\'' + v.id + '\',\'' + fixType + '\',this)">📋 Guided Fix</button>';
+      } else {
+        fixBtn = '<span class="badge badge-neutral">Manual review needed</span>';
+      }
+
+      html += '<tr class="' + (locked ? "locked-row" : "") + '">' +
+        '<td><div class="violation-title">' + escHtml(v.title || v.rule_id || "Violation") + '</div>' +
+        (v.description && !locked ? '<div class="violation-desc">' + escHtml(v.description) + '</div>' : '') +
+        '<div class="violation-rule">' + escHtml(v.rule_id || "") + '</div></td>' +
+        '<td><span class="badge ' + badgeClass + '">' + sev + '</span></td>' +
+        '<td><span class="badge badge-neutral">' + escHtml(v.channel || "—") + '</span></td>' +
+        '<td><div class="fix-actions">' + fixBtn + '</div></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }).catch(function() {
+    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Could not load violations</h3><p>Please try running a scan first.</p></div>';
+  });
+}
+
+// ── Apply fix ─────────────────────────────────────────────────
+function applyFix(violationId, fixType, btn) {
+  btn.disabled = true;
+  var orig = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  api("POST", "/api/fix/" + violationId, { shop: SHOP }).then(function(d) {
+    if (d.error) {
+      toast("Fix failed: " + d.error, "error");
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      return;
+    }
+    if (d.pending) {
+      toast("Guided fix: " + (d.instructions || "Follow the steps in the fix guide."), "", 6000);
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      return;
+    }
+    toast("Fix applied successfully!", "success");
+    loadViolations();
+    loadDashboard();
+  }).catch(function() {
+    toast("Network error applying fix.", "error");
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  });
+}
+
+// ── Revert fix ────────────────────────────────────────────────
+function revertFix(fixId, btn) {
+  if (!fixId || !confirm("Revert this fix? This will restore the original content.")) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner dark"></span>';
+
+  api("POST", "/api/fix/" + fixId + "/revert", { shop: SHOP }).then(function(d) {
+    if (d.error) { toast("Revert failed: " + d.error, "error"); return; }
+    toast("Fix reverted.", "success");
+    loadViolations();
+    loadDashboard();
+  }).catch(function() { toast("Network error reverting fix.", "error"); });
+}
+
+// ── Run scan ──────────────────────────────────────────────────
+function runScan() {
+  var btn  = document.getElementById("scan-btn");
+  var text = document.getElementById("scan-btn-text");
+  btn.disabled = true;
+  text.innerHTML = '<span class="spinner"></span> Scanning…';
+
+  api("POST", "/api/scan", { shop: SHOP, channels: allChannels }).then(function(d) {
+    if (d.error) {
+      toast("Scan failed: " + d.error, "error");
+      btn.disabled = false;
+      text.textContent = "▶ Run Scan";
+      return;
+    }
+    currentScanId = d.scan_id;
+    toast("Scan started — checking compliance…");
+    pollScan(d.scan_id, btn, text);
+  }).catch(function() {
+    toast("Could not start scan.", "error");
+    btn.disabled = false;
+    text.textContent = "▶ Run Scan";
+  });
+}
+
+function pollScan(scanId, btn, text) {
+  if (scanPollInterval) clearInterval(scanPollInterval);
+  var dots = 0;
+  scanPollInterval = setInterval(function() {
+    dots = (dots + 1) % 4;
+    text.innerHTML = '<span class="spinner"></span> Scanning' + ".".repeat(dots + 1);
+
+    api("GET", "/api/scan/" + scanId + "/status").then(function(d) {
+      if (d.status === "done" || d.status === "failed") {
+        clearInterval(scanPollInterval);
+        btn.disabled = false;
+        text.textContent = "▶ Run Scan";
+        if (d.status === "done") {
+          toast("Scan complete! " + (d.violations_found || 0) + " violations found.", "success");
+          loadDashboard();
+          loadViolations();
+          loadHistory();
+        } else {
+          toast("Scan failed: " + (d.error || "unknown error"), "error");
+        }
+      }
+    });
+  }, 3000);
+}
+
+// ── Load history ──────────────────────────────────────────────
+function loadHistory() {
+  api("GET", "/api/history").then(function(d) {
+    var history = d.history || [];
+    var container = document.getElementById("history-container");
+    if (!history.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h3>No scans yet</h3><p>Run your first scan to see compliance history.</p></div>';
+      return;
+    }
+    container.innerHTML = history.slice(0, 10).map(function(h) {
+      var score = h.overall_score || 0;
+      var scoreClass = score >= 80 ? "success" : score >= 60 ? "warning" : "critical";
+      return '<div class="history-item">' +
+        '<div><div style="font-weight:600">' + escHtml(h.channel || "Full audit") + '</div>' +
+        '<div class="history-meta">' + escHtml(h.scanned_at ? h.scanned_at.substring(0,16).replace("T"," ") : "—") +
+        ' · ' + (h.violations_found || 0) + ' violations · ' + escHtml(h.status || "") + '</div></div>' +
+        '<div class="history-score ' + scoreClass + '">' + score + '</div>' +
+        '</div>';
+    }).join("");
+  }).catch(function() {});
+}
+
+// ── Utility ───────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Init ──────────────────────────────────────────────────────
+renderChannelTabs();
+loadDashboard();
+loadViolations();
+loadHistory();
+</script>
 </body>
 </html>
