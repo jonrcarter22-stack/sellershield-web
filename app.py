@@ -15,6 +15,7 @@ import json
 import hmac as hmac_lib
 import hashlib
 import threading
+from functools import wraps
 from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, send_file, abort, redirect as flask_redirect, make_response
@@ -22,8 +23,10 @@ import requests as http_req
 try:
     import psycopg2
     import psycopg2.extras
+    from psycopg2.extras import RealDictCursor
 except ImportError:
     psycopg2 = None
+    RealDictCursor = None
 
 # Add engine directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "engine"))
@@ -32,7 +35,6 @@ from audit_engine import AuditEngine
 from report_generator import generate_pdf
 
 app = Flask(__name__)
-_init_db()
 
 # ── In-memory audit cache (results live for 2 hours) ──────────────────────
 _cache = {}
@@ -59,7 +61,8 @@ SHOPIFY_BILLING_TEST = os.environ.get("SHOPIFY_BILLING_TEST", "true").lower() ==
 DATABASE_URL       = os.environ.get("DATABASE_URL", "")
 SHOPIFY_SCOPES = (
     "read_products,write_products,read_orders,"
-    "read_customers,read_script_tags,write_script_tags"
+    "read_customers,read_script_tags,write_script_tags,"
+    "write_pages,read_shipping,write_metafields"
 )
 
 # In-memory fallback (used when no DATABASE_URL is set)
@@ -150,6 +153,793 @@ def _db_save_charge(shop: str, charge_id, status: str):
             conn.commit()
     except Exception as e:
         print(f"[DB] save_charge error: {e}")
+
+
+# ── Plan Configuration ─────────────────────────────────────────────────────
+
+PLAN_LIMITS = {
+    "free": {
+        "name": "Free", "price_cents": 0,
+        "channels": ["google"], "auto_fix": False, "one_click_fix": False,
+        "frequency": "manual", "max_scans_month": 1, "appeal_guidance": False,
+    },
+    "starter": {
+        "name": "Starter", "price_cents": 2900,
+        "channels": ["google"], "auto_fix": True, "one_click_fix": False,
+        "frequency": "weekly", "max_scans_month": 4, "appeal_guidance": False,
+    },
+    "growth": {
+        "name": "Growth", "price_cents": 6900,
+        "channels": ["google", "amazon", "meta"], "auto_fix": True,
+        "one_click_fix": True, "frequency": "daily", "max_scans_month": 30,
+        "appeal_guidance": False,
+    },
+    "pro": {
+        "name": "Pro", "price_cents": 9900,
+        "channels": ["google", "amazon", "meta"], "auto_fix": True,
+        "one_click_fix": True, "frequency": "realtime", "max_scans_month": 999,
+        "appeal_guidance": True,
+    },
+}
+
+SHOPIFY_BILLING_PLANS = {
+    "starter": {"name": "SellerShield Starter", "price": 29.00, "trial_days": 7},
+    "growth":  {"name": "SellerShield Growth",  "price": 69.00, "trial_days": 7},
+    "pro":     {"name": "SellerShield Pro",      "price": 99.00, "trial_days": 7},
+}
+
+
+# ── Extended DB Schema ─────────────────────────────────────────────────────
+
+def _init_extended_schema():
+    """Create scans, violations, fixes, and shop_plans tables."""
+    if not DATABASE_URL or not psycopg2:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS shop_plans (
+                        shop TEXT PRIMARY KEY,
+                        plan_name TEXT DEFAULT 'free',
+                        charge_id BIGINT,
+                        trial_ends_at TIMESTAMPTZ,
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    );
+
+                    CREATE TABLE IF NOT EXISTS scans (
+                        id SERIAL PRIMARY KEY,
+                        shop TEXT NOT NULL,
+                        status TEXT DEFAULT 'running',
+                        overall_score INTEGER,
+                        google_score INTEGER,
+                        amazon_score INTEGER,
+                        meta_score INTEGER,
+                        violation_count INTEGER DEFAULT 0,
+                        started_at TIMESTAMPTZ DEFAULT NOW(),
+                        completed_at TIMESTAMPTZ,
+                        error TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS scans_shop_idx ON scans(shop);
+
+                    CREATE TABLE IF NOT EXISTS violations (
+                        id SERIAL PRIMARY KEY,
+                        scan_id INTEGER REFERENCES scans(id) ON DELETE CASCADE,
+                        shop TEXT NOT NULL,
+                        channel TEXT NOT NULL,
+                        rule_id TEXT NOT NULL,
+                        severity TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        fix_type TEXT NOT NULL DEFAULT 'flagged',
+                        fix_details JSONB DEFAULT '{}',
+                        status TEXT DEFAULT 'open',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        resolved_at TIMESTAMPTZ
+                    );
+                    CREATE INDEX IF NOT EXISTS violations_shop_idx ON violations(shop);
+
+                    CREATE TABLE IF NOT EXISTS fixes (
+                        id SERIAL PRIMARY KEY,
+                        shop TEXT NOT NULL,
+                        violation_id INTEGER REFERENCES violations(id),
+                        fix_type TEXT NOT NULL,
+                        details JSONB DEFAULT '{}',
+                        status TEXT DEFAULT 'applied',
+                        applied_at TIMESTAMPTZ DEFAULT NOW(),
+                        reverted_at TIMESTAMPTZ,
+                        revert_data JSONB DEFAULT '{}'
+                    );
+                    CREATE INDEX IF NOT EXISTS fixes_shop_idx ON fixes(shop);
+                """)
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] extended schema error: {e}")
+
+
+# ── Extended DB helpers ────────────────────────────────────────────────────
+
+def _db_get_plan(shop: str) -> dict:
+    """Returns the plan limits dict for a shop. Defaults to free."""
+    plan_name = "free"
+    if DATABASE_URL and psycopg2:
+        try:
+            with _db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT plan_name FROM shop_plans WHERE shop = %s", (shop,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        plan_name = row[0]
+        except Exception as e:
+            print(f"[DB] get_plan error: {e}")
+    # Also check billing status from shop_installs
+    install = _db_get_install(shop)
+    if install and install[2] != "active" and not SHOPIFY_BILLING_TEST:
+        plan_name = "free"
+    return {**PLAN_LIMITS.get(plan_name, PLAN_LIMITS["free"]), "plan_name": plan_name}
+
+
+def _db_set_plan(shop: str, plan_name: str, charge_id=None):
+    if not DATABASE_URL or not psycopg2:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO shop_plans (shop, plan_name, charge_id, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (shop) DO UPDATE SET
+                        plan_name = EXCLUDED.plan_name,
+                        charge_id = COALESCE(EXCLUDED.charge_id, shop_plans.charge_id),
+                        updated_at = NOW()
+                """, (shop, plan_name, charge_id))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] set_plan error: {e}")
+
+
+def _db_create_scan(shop: str) -> int:
+    if not DATABASE_URL or not psycopg2:
+        return -1
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO scans (shop) VALUES (%s) RETURNING id", (shop,)
+                )
+                scan_id = cur.fetchone()[0]
+            conn.commit()
+            return scan_id
+    except Exception as e:
+        print(f"[DB] create_scan error: {e}")
+        return -1
+
+
+def _db_complete_scan(scan_id: int, scores: dict, violation_count: int):
+    if not DATABASE_URL or not psycopg2 or scan_id < 0:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE scans SET
+                        status = 'complete',
+                        overall_score = %s,
+                        google_score = %s,
+                        amazon_score = %s,
+                        meta_score = %s,
+                        violation_count = %s,
+                        completed_at = NOW()
+                    WHERE id = %s
+                """, (
+                    scores.get("overall"), scores.get("google"),
+                    scores.get("amazon"), scores.get("meta"),
+                    violation_count, scan_id
+                ))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] complete_scan error: {e}")
+
+
+def _db_fail_scan(scan_id: int, error: str):
+    if not DATABASE_URL or not psycopg2 or scan_id < 0:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE scans SET status='failed', error=%s, completed_at=NOW() WHERE id=%s",
+                    (error[:500], scan_id)
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] fail_scan error: {e}")
+
+
+def _db_save_violation(scan_id: int, shop: str, channel: str, rule_id: str,
+                       severity: str, title: str, description: str,
+                       fix_type: str, fix_details: dict) -> int:
+    if not DATABASE_URL or not psycopg2:
+        return -1
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO violations
+                        (scan_id, shop, channel, rule_id, severity, title,
+                         description, fix_type, fix_details)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id
+                """, (scan_id, shop, channel, rule_id, severity, title,
+                      description, fix_type, json.dumps(fix_details)))
+                vid = cur.fetchone()[0]
+            conn.commit()
+            return vid
+    except Exception as e:
+        print(f"[DB] save_violation error: {e}")
+        return -1
+
+
+def _db_get_violations(shop: str, channel: str = None, status: str = "open") -> list:
+    if not DATABASE_URL or not psycopg2:
+        return []
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if channel:
+                    cur.execute("""
+                        SELECT v.*, s.started_at as scan_time
+                        FROM violations v JOIN scans s ON v.scan_id = s.id
+                        WHERE v.shop=%s AND v.channel=%s AND v.status=%s
+                        ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, v.id DESC
+                    """, (shop, channel, status))
+                else:
+                    cur.execute("""
+                        SELECT v.*, s.started_at as scan_time
+                        FROM violations v JOIN scans s ON v.scan_id = s.id
+                        WHERE v.shop=%s AND v.status=%s
+                        ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, v.id DESC
+                    """, (shop, status))
+                rows = cur.fetchall()
+                return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[DB] get_violations error: {e}")
+        return []
+
+
+def _db_get_latest_scan(shop: str) -> dict:
+    if not DATABASE_URL or not psycopg2:
+        return {}
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM scans WHERE shop=%s
+                    ORDER BY started_at DESC LIMIT 1
+                """, (shop,))
+                row = cur.fetchone()
+                return dict(row) if row else {}
+    except Exception as e:
+        print(f"[DB] get_latest_scan error: {e}")
+        return {}
+
+
+def _db_save_fix(shop: str, violation_id: int, fix_type: str,
+                 details: dict, revert_data: dict) -> int:
+    if not DATABASE_URL or not psycopg2:
+        return -1
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO fixes (shop, violation_id, fix_type, details, revert_data, status, applied_at)
+                    VALUES (%s,%s,%s,%s,%s,'applied',NOW())
+                    RETURNING id
+                """, (shop, violation_id, fix_type, json.dumps(details), json.dumps(revert_data)))
+                fix_id = cur.fetchone()[0]
+                # Mark violation resolved
+                cur.execute(
+                    "UPDATE violations SET status='resolved', resolved_at=NOW() WHERE id=%s",
+                    (violation_id,)
+                )
+            conn.commit()
+            return fix_id
+    except Exception as e:
+        print(f"[DB] save_fix error: {e}")
+        return -1
+
+
+def _db_revert_fix(fix_id: int) -> dict:
+    if not DATABASE_URL or not psycopg2:
+        return {}
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM fixes WHERE id=%s", (fix_id,))
+                fix = cur.fetchone()
+                if not fix or fix["status"] != "applied":
+                    return {}
+                revert_data = fix["revert_data"] or {}
+                cur.execute(
+                    "UPDATE fixes SET status='reverted', reverted_at=NOW() WHERE id=%s",
+                    (fix_id,)
+                )
+                cur.execute(
+                    "UPDATE violations SET status='open', resolved_at=NULL WHERE id=%s",
+                    (fix["violation_id"],)
+                )
+            conn.commit()
+            return dict(fix)
+    except Exception as e:
+        print(f"[DB] revert_fix error: {e}")
+        return {}
+
+
+def _db_get_fix_history(shop: str, limit: int = 50) -> list:
+    if not DATABASE_URL or not psycopg2:
+        return []
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT f.*, v.title as violation_title, v.channel, v.severity
+                    FROM fixes f
+                    LEFT JOIN violations v ON f.violation_id = v.id
+                    WHERE f.shop=%s
+                    ORDER BY f.applied_at DESC
+                    LIMIT %s
+                """, (shop, limit))
+                return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        print(f"[DB] get_fix_history error: {e}")
+        return []
+
+
+# ── API Auth Decorator ─────────────────────────────────────────────────────
+
+def require_api_auth(f):
+    """Verify the requesting shop has a valid install."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        shop = (
+            request.headers.get("X-Shopify-Shop-Domain")
+            or request.args.get("shop", "")
+            or (request.get_json(silent=True) or {}).get("shop", "")
+        )
+        if not shop:
+            return jsonify({"error": "Missing shop domain"}), 401
+        install = _db_get_install(shop)
+        if not install or not install[0]:
+            return jsonify({"error": "Shop not authenticated"}), 401
+        request.shop = shop
+        request.shop_token = install[0]
+        request.plan = _db_get_plan(shop)
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ── Scan Engine (maps audit results → DB violations) ──────────────────────
+
+_PLATFORM_TO_CHANNEL = {
+    "google": "google", "amazon": "amazon",
+    "meta": "meta", "tiktok": "meta", "walmart": "amazon",
+}
+
+_FIX_TYPE_MAP = {
+    # rule_id prefixes → fix_type
+    "POL-": "auto",   # Policy pages → fully automatic
+    "CON-": "auto",   # Contact info → fully automatic
+    "PRD-": "one_click",  # Product feed → one-click with preview
+    "GTN-": "guided", # GTIN issues → guided
+    "APP-": "flagged", # App conflicts → flagged only
+    "REP-": "flagged", # Reputation → flagged only
+}
+
+def _resolve_fix_type(rule_id: str) -> str:
+    for prefix, fix_type in _FIX_TYPE_MAP.items():
+        if rule_id.startswith(prefix):
+            return fix_type
+    return "flagged"
+
+
+def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
+    """Run audit and store results. Called in a background thread."""
+    try:
+        channels = plan.get("channels", ["google"])
+        engine = AuditEngine(timeout=15)
+        result = engine.audit(url, channels)
+
+        scores = {
+            "overall": result.overall_score,
+            "google": None, "amazon": None, "meta": None,
+        }
+        for ps in result.platform_scores:
+            ch = _PLATFORM_TO_CHANNEL.get(ps.platform)
+            if ch and scores.get(ch) is None:
+                scores[ch] = ps.score
+
+        seen_rules = set()
+        vcount = 0
+        for f in result.all_findings:
+            if f.rule_id in seen_rules:
+                continue
+            seen_rules.add(f.rule_id)
+            channel = "google"  # default; richer mapping comes in Phase 3
+            fix_type = _resolve_fix_type(f.rule_id)
+            _db_save_violation(
+                scan_id=scan_id, shop=shop, channel=channel,
+                rule_id=f.rule_id, severity=f.severity.lower(),
+                title=f.message, description=f.fix or "",
+                fix_type=fix_type, fix_details={"fix_text": f.fix or ""},
+            )
+            vcount += 1
+
+        _db_complete_scan(scan_id, scores, vcount)
+    except Exception as e:
+        _db_fail_scan(scan_id, str(e))
+
+
+# ── Shopify Admin API helpers ─────────────────────────────────────────────
+
+def _shopify_api(shop: str, token: str, method: str, path: str, body=None):
+    """Make a call to the Shopify Admin API."""
+    url = f"https://{shop}/admin/api/2024-01/{path}"
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    resp = getattr(http_req, method)(url, headers=headers, json=body, timeout=15)
+    return resp
+
+
+def _get_shop_info(shop: str, token: str) -> dict:
+    resp = _shopify_api(shop, token, "get", "shop.json")
+    if resp.status_code == 200:
+        return resp.json().get("shop", {})
+    return {}
+
+
+def _get_shop_pages(shop: str, token: str) -> list:
+    resp = _shopify_api(shop, token, "get", "pages.json?limit=250")
+    if resp.status_code == 200:
+        return resp.json().get("pages", [])
+    return []
+
+
+def _create_shop_page(shop: str, token: str, title: str, body_html: str) -> dict:
+    resp = _shopify_api(shop, token, "post", "pages.json",
+                        body={"page": {"title": title, "body_html": body_html, "published": True}})
+    if resp.status_code == 201:
+        return resp.json().get("page", {})
+    return {}
+
+
+def _update_shop_page(shop: str, token: str, page_id: int, body_html: str) -> dict:
+    resp = _shopify_api(shop, token, "put", f"pages/{page_id}.json",
+                        body={"page": {"id": page_id, "body_html": body_html}})
+    if resp.status_code == 200:
+        return resp.json().get("page", {})
+    return {}
+
+
+# ── Policy Page Auto-Fix ───────────────────────────────────────────────────
+
+_POLICY_TEMPLATES = {
+    "privacy": {
+        "title": "Privacy Policy",
+        "handle": "privacy-policy",
+        "body": lambda info: f"""<h2>Privacy Policy</h2>
+<p>Last updated: {datetime.utcnow().strftime('%B %d, %Y')}</p>
+<p>{info.get('name', 'Our store')} ("we", "us", or "our") is committed to protecting your privacy.</p>
+<h3>Information We Collect</h3>
+<p>We collect information you provide when placing orders, including your name, email, shipping address, and payment information.</p>
+<h3>How We Use Your Information</h3>
+<p>We use your information to process orders, send order confirmations, and provide customer support.</p>
+<h3>Data Sharing</h3>
+<p>We do not sell your personal information. We share data only with service providers needed to fulfill your orders.</p>
+<h3>Your Rights</h3>
+<p>You may request access to, correction of, or deletion of your personal data by contacting us at {info.get('email', 'support@' + info.get('domain', 'ourstore.com'))}.</p>
+<h3>Contact</h3>
+<p>Email: {info.get('email', '')}<br>Phone: {info.get('phone', '')}<br>Address: {info.get('address1', '')}, {info.get('city', '')}</p>""",
+    },
+    "refund": {
+        "title": "Refund Policy",
+        "handle": "refund-policy",
+        "body": lambda info: f"""<h2>Refund Policy</h2>
+<p>We offer a 30-day return policy. Items must be unused and in original packaging.</p>
+<h3>How to Return</h3>
+<p>Contact us at {info.get('email', '')} within 30 days of delivery to initiate a return.</p>
+<h3>Refund Process</h3>
+<p>Once we receive and inspect your return, we will notify you of the refund approval. Approved refunds are processed within 5-10 business days.</p>
+<h3>Exchanges</h3>
+<p>We replace items that are defective or damaged. Contact us to arrange an exchange.</p>""",
+    },
+    "shipping": {
+        "title": "Shipping Policy",
+        "handle": "shipping-policy",
+        "body": lambda info: f"""<h2>Shipping Policy</h2>
+<p>We ship to all addresses within the United States. International shipping is available for select countries.</p>
+<h3>Processing Time</h3>
+<p>Orders are processed within 1-3 business days.</p>
+<h3>Shipping Times</h3>
+<p>Standard shipping: 5-7 business days<br>Expedited shipping: 2-3 business days</p>
+<h3>Tracking</h3>
+<p>A tracking number will be emailed to you once your order ships. Contact us at {info.get('email', '')} with any shipping questions.</p>""",
+    },
+    "terms": {
+        "title": "Terms of Service",
+        "handle": "terms-of-service",
+        "body": lambda info: f"""<h2>Terms of Service</h2>
+<p>By using {info.get('name', 'our store')} you agree to these terms.</p>
+<h3>Products</h3>
+<p>We reserve the right to refuse service or limit quantities at our discretion.</p>
+<h3>Accuracy of Information</h3>
+<p>We strive for accuracy in product descriptions and pricing. Errors will be corrected when discovered.</p>
+<h3>Limitation of Liability</h3>
+<p>Our liability is limited to the amount paid for the product in question.</p>
+<h3>Contact</h3>
+<p>{info.get('name', '')}<br>{info.get('email', '')}</p>""",
+    },
+}
+
+_POLICY_RULE_MAP = {
+    # rule_id → policy key
+    "POL-001": "privacy", "POL-002": "refund",
+    "POL-003": "shipping", "POL-004": "terms",
+}
+
+
+def _auto_fix_policy_page(shop: str, token: str, violation_id: int, rule_id: str) -> dict:
+    """Generate and create/update a missing policy page via Shopify API."""
+    policy_key = _POLICY_RULE_MAP.get(rule_id)
+    if not policy_key or policy_key not in _POLICY_TEMPLATES:
+        return {"success": False, "error": "Unknown policy rule"}
+
+    tmpl = _POLICY_TEMPLATES[policy_key]
+    shop_info = _get_shop_info(shop, token)
+    body_html = tmpl["body"](shop_info)
+
+    # Check if page already exists
+    pages = _get_shop_pages(shop, token)
+    existing = next((p for p in pages if p.get("handle") == tmpl["handle"]), None)
+
+    if existing:
+        revert_data = {"page_id": existing["id"], "old_body": existing.get("body_html", "")}
+        updated = _update_shop_page(shop, token, existing["id"], body_html)
+        if updated:
+            _db_save_fix(shop, violation_id, "auto",
+                         {"policy": policy_key, "page_id": existing["id"], "action": "updated"},
+                         revert_data)
+            return {"success": True, "action": "updated", "page_id": existing["id"],
+                    "title": tmpl["title"]}
+    else:
+        created = _create_shop_page(shop, token, tmpl["title"], body_html)
+        if created:
+            _db_save_fix(shop, violation_id, "auto",
+                         {"policy": policy_key, "page_id": created["id"], "action": "created"},
+                         {"page_id": created["id"], "created": True})
+            return {"success": True, "action": "created", "page_id": created.get("id"),
+                    "title": tmpl["title"]}
+
+    return {"success": False, "error": "Shopify API error"}
+
+
+# ── API Routes ─────────────────────────────────────────────────────────────
+
+@app.route("/api/dashboard")
+@require_api_auth
+def api_dashboard():
+    shop = request.shop
+    plan = request.plan
+    scan = _db_get_latest_scan(shop)
+    violations = _db_get_violations(shop)
+
+    critical = sum(1 for v in violations if v["severity"] == "critical")
+    warnings = sum(1 for v in violations if v["severity"] == "warning")
+    infos    = sum(1 for v in violations if v["severity"] == "info")
+
+    # Compute next scan time based on plan
+    next_scan = None
+    if scan.get("completed_at"):
+        freq = plan.get("frequency", "manual")
+        if freq == "weekly":
+            next_scan = (scan["completed_at"] + timedelta(days=7)).isoformat()
+        elif freq == "daily":
+            next_scan = (scan["completed_at"] + timedelta(days=1)).isoformat()
+        elif freq == "realtime":
+            next_scan = "Continuous"
+
+    return jsonify({
+        "shop": shop,
+        "plan": plan,
+        "scan": {
+            "id": scan.get("id"),
+            "status": scan.get("status"),
+            "overall_score": scan.get("overall_score"),
+            "google_score": scan.get("google_score"),
+            "amazon_score": scan.get("amazon_score"),
+            "meta_score": scan.get("meta_score"),
+            "violation_count": scan.get("violation_count", 0),
+            "last_scanned": scan.get("completed_at", {}).isoformat() if scan.get("completed_at") else None,
+            "next_scan": next_scan,
+        },
+        "summary": {"critical": critical, "warning": warnings, "info": infos},
+        "channels_available": plan.get("channels", ["google"]),
+        "all_channels": ["google", "amazon", "meta"],
+    })
+
+
+@app.route("/api/scan", methods=["POST"])
+@require_api_auth
+def api_trigger_scan():
+    shop = request.shop
+    token = request.shop_token
+    plan = request.plan
+    data = request.get_json(silent=True) or {}
+    store_url = data.get("url", "").strip()
+
+    if not store_url:
+        # Try to get URL from Shopify
+        shop_info = _get_shop_info(shop, token)
+        store_url = f"https://{shop_info.get('domain', shop)}"
+
+    scan_id = _db_create_scan(shop)
+    # Run in background thread so we can respond immediately
+    t = threading.Thread(
+        target=_run_scan_for_shop,
+        args=(shop, store_url, scan_id, plan),
+        daemon=True
+    )
+    t.start()
+
+    return jsonify({"scan_id": scan_id, "status": "running", "shop": shop})
+
+
+@app.route("/api/scan/<int:scan_id>/status")
+@require_api_auth
+def api_scan_status(scan_id):
+    if not DATABASE_URL or not psycopg2:
+        return jsonify({"status": "unknown"})
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM scans WHERE id=%s AND shop=%s",
+                            (scan_id, request.shop))
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "Not found"}), 404
+                return jsonify(dict(row))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/violations")
+@require_api_auth
+def api_violations():
+    shop = request.shop
+    plan = request.plan
+    channel = request.args.get("channel")
+    status = request.args.get("status", "open")
+
+    violations = _db_get_violations(shop, channel=channel, status=status)
+
+    # Gate: hide full details for channels not on plan
+    allowed_channels = set(plan.get("channels", ["google"]))
+    result = []
+    for v in violations:
+        v_out = dict(v)
+        if v["channel"] not in allowed_channels:
+            v_out["_locked"] = True
+            v_out["description"] = None
+            v_out["fix_details"] = {}
+        # Gate fix buttons based on plan
+        if not plan.get("auto_fix") and v["fix_type"] == "auto":
+            v_out["fix_type"] = "locked"
+        if not plan.get("one_click_fix") and v["fix_type"] == "one_click":
+            v_out["fix_type"] = "locked"
+        # Serialize datetime fields
+        for k in ("created_at", "resolved_at", "scan_time"):
+            if v_out.get(k) and hasattr(v_out[k], "isoformat"):
+                v_out[k] = v_out[k].isoformat()
+        result.append(v_out)
+
+    return jsonify({"violations": result, "total": len(result)})
+
+
+@app.route("/api/fix/<int:violation_id>", methods=["POST"])
+@require_api_auth
+def api_apply_fix(violation_id):
+    shop = request.shop
+    token = request.shop_token
+    plan = request.plan
+
+    # Fetch violation
+    if not DATABASE_URL or not psycopg2:
+        return jsonify({"error": "Database required"}), 503
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT * FROM violations WHERE id=%s AND shop=%s", (violation_id, shop)
+                )
+                v = cur.fetchone()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    if not v:
+        return jsonify({"error": "Violation not found"}), 404
+    if v["status"] == "resolved":
+        return jsonify({"error": "Already resolved"}), 400
+
+    v = dict(v)
+    fix_type = v["fix_type"]
+
+    # Check plan gating
+    if fix_type == "auto" and not plan.get("auto_fix"):
+        return jsonify({"error": "Upgrade to Starter or higher to use auto-fix", "upgrade": True}), 403
+    if fix_type == "one_click" and not plan.get("one_click_fix"):
+        return jsonify({"error": "Upgrade to Growth or higher for one-click fixes", "upgrade": True}), 403
+
+    # Route to correct fix handler
+    if fix_type == "auto":
+        rule_id = v["rule_id"]
+        if rule_id in _POLICY_RULE_MAP:
+            result = _auto_fix_policy_page(shop, token, violation_id, rule_id)
+            return jsonify(result)
+        return jsonify({"error": f"No auto-fix handler for {rule_id}"}), 400
+
+    elif fix_type in ("one_click", "guided"):
+        # Phase 4 will implement these — return preview data for now
+        return jsonify({
+            "success": False,
+            "pending": True,
+            "message": "One-click and guided fixes coming in the next update",
+            "fix_details": v.get("fix_details", {}),
+        })
+
+    return jsonify({"error": "Fix type not supported", "fix_type": fix_type}), 400
+
+
+@app.route("/api/fix/<int:fix_id>/revert", methods=["POST"])
+@require_api_auth
+def api_revert_fix(fix_id):
+    shop = request.shop
+    token = request.shop_token
+
+    fix = _db_revert_fix(fix_id)
+    if not fix:
+        return jsonify({"error": "Fix not found or already reverted"}), 404
+
+    revert_data = fix.get("revert_data") or {}
+
+    # Handle policy page revert
+    if fix.get("fix_type") == "auto":
+        page_id = revert_data.get("page_id")
+        if page_id and revert_data.get("created"):
+            # Delete the page we created
+            _shopify_api(shop, token, "delete", f"pages/{page_id}.json")
+        elif page_id and revert_data.get("old_body") is not None:
+            # Restore original content
+            _update_shop_page(shop, token, page_id, revert_data["old_body"])
+
+    return jsonify({"success": True, "fix_id": fix_id})
+
+
+@app.route("/api/history")
+@require_api_auth
+def api_fix_history():
+    shop = request.shop
+    history = _db_get_fix_history(shop)
+    for item in history:
+        for k in ("applied_at", "reverted_at"):
+            if item.get(k) and hasattr(item[k], "isoformat"):
+                item[k] = item[k].isoformat()
+    return jsonify({"history": history})
+
+
+@app.route("/api/plan")
+@require_api_auth
+def api_plan():
+    return jsonify({"plan": request.plan, "all_plans": PLAN_LIMITS})
 
 
 def _verify_shopify_hmac(params: dict) -> bool:
@@ -598,6 +1388,10 @@ def about():
 </div>
 {_footer()}</body></html>"""
 
+
+# ── Startup ────────────────────────────────────────────────────────────────
+_init_db()
+_init_extended_schema()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
