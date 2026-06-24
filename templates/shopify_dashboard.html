@@ -253,7 +253,7 @@ body {
   </div>
 
   <!-- Plan banner (shown for free/starter) -->
-  <div class="plan-banner upgrade" id="upgrade-banner" style="display:none">
+  <div class="plan-banner upgrade" id="upgrade-banner" style="display:none"><!-- shown by JS -->
     <div class="plan-banner-text">
       <h3>🔒 Upgrade to unlock full compliance</h3>
       <p id="upgrade-text">Upgrade your plan to access auto-fix, more channels, and daily scans.</p>
@@ -471,14 +471,24 @@ function loadDashboard() {
     var planName = (plan.name || "Free").toUpperCase();
     document.getElementById("plan-badge").textContent = "📋 " + planName;
 
-    // Upgrade banner
-    if (planName === "FREE" || planName === "STARTER") {
-      var banner = document.getElementById("upgrade-banner");
-      banner.style.display = "flex";
-      document.getElementById("upgrade-text").textContent =
-        planName === "FREE"
-          ? "Free plan: 1 scan/month, Google only. Upgrade to auto-fix violations and scan all channels."
-          : "Starter plan: Google only. Upgrade to Growth to add Amazon & Meta + one-click fixes.";
+    // Plan banner — always visible
+    var banner = document.getElementById("upgrade-banner");
+    banner.style.display = "flex";
+    var upgradeBtn = document.getElementById("upgrade-btn");
+    var bannerMessages = {
+      "FREE":    "Free plan: 1 scan/month, Google only. Upgrade to auto-fix violations and scan all channels.",
+      "STARTER": "Starter plan: Google only. Upgrade to Growth to add Amazon & Meta + one-click fixes.",
+      "GROWTH":  "Growth plan: Amazon & Meta included. Upgrade to Pro for unlimited scans and appeal guidance.",
+      "PRO":     "Pro plan: All features active. You're fully protected across all channels.",
+    };
+    document.getElementById("upgrade-text").textContent =
+      bannerMessages[planName] || "Manage your SellerShield subscription.";
+    if (planName === "PRO") {
+      upgradeBtn.textContent = "Manage Plan";
+      banner.classList.remove("upgrade");
+    } else {
+      upgradeBtn.textContent = planName === "FREE" || planName === "STARTER" ? "Upgrade Plan" : "Manage Plan";
+      banner.classList.add("upgrade");
     }
 
     // Channels from plan
