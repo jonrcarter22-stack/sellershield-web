@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SellerShield — Choose a Plan</title>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<style>
+:root {
+  --bg:      #f6f6f7;
+  --surface: #ffffff;
+  --border:  #e1e3e5;
+  --text:    #202223;
+  --muted:   #6d7175;
+  --green:   #008060;
+  --green-d: #006a4d;
+  --red:     #d72c0d;
+  --shadow:  0 1px 0 rgba(0,0,0,.05), 0 0 0 1px rgba(0,0,0,.07);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       background: var(--bg); color: var(--text); min-height: 100vh; }
+.page { max-width: 880px; margin: 0 auto; padding: 40px 24px 80px; }
+.header { text-align: center; margin-bottom: 40px; }
+.header h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+.header p  { color: var(--muted); font-size: 15px; }
+
+/* Plan grid */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+.plan {
+  background: var(--surface); border-radius: 12px; box-shadow: var(--shadow);
+  padding: 28px 24px; display: flex; flex-direction: column; position: relative;
+  border: 2px solid transparent; transition: border-color .15s;
+}
+.plan.popular { border-color: var(--green); }
+.plan.current { border-color: #6d28d9; }
+.popular-badge {
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  background: var(--green); color: #fff; font-size: 11px; font-weight: 700;
+  padding: 3px 12px; border-radius: 20px; white-space: nowrap;
+}
+.current-badge {
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  background: #6d28d9; color: #fff; font-size: 11px; font-weight: 700;
+  padding: 3px 12px; border-radius: 20px; white-space: nowrap;
+}
+.plan-name  { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.plan-price { font-size: 36px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+.plan-price span { font-size: 16px; font-weight: 500; color: var(--muted); }
+.plan-desc  { font-size: 13px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+.plan-features { list-style: none; flex: 1; margin-bottom: 24px; }
+.plan-features li {
+  font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.plan-features li:last-child { border-bottom: none; }
+.plan-features .check { color: var(--green); font-weight: 700; flex-shrink: 0; }
+.plan-features .cross { color: #bbb; flex-shrink: 0; }
+.plan-features .lock  { color: #bbb; font-size: 11px; flex-shrink: 0; }
+.btn-plan {
+  display: block; width: 100%; text-align: center;
+  padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600;
+  cursor: pointer; border: none; transition: all .15s;
+}
+.btn-plan.primary   { background: var(--green); color: #fff; }
+.btn-plan.primary:hover { background: var(--green-d); }
+.btn-plan.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+.btn-plan.secondary:hover { background: #f1f2f4; }
+.btn-plan.current-plan { background: #f3f0ff; color: #6d28d9; border: 1px solid #c4b5fd; cursor: default; }
+.btn-plan:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Trial note */
+.trial-note { text-align: center; margin-top: 24px; font-size: 13px; color: var(--muted); }
+.trial-note strong { color: var(--text); }
+
+/* FAQ */
+.faq { margin-top: 48px; }
+.faq h2 { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+.faq-item { background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); padding: 20px 24px; margin-bottom: 10px; }
+.faq-item h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.faq-item p  { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+/* Toast */
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 999; }
+.toast { background: var(--text); color: #fff; padding: 12px 20px; border-radius: 6px;
+         font-size: 14px; font-weight: 500; margin-top: 8px; animation: slideIn .2s ease; }
+.toast.success { background: #008060; }
+.toast.error   { background: var(--red); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } }
+
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4);
+           border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <h1>Choose your plan</h1>
+    <p>All plans include a <strong>7-day free trial</strong>. Cancel anytime.</p>
+  </div>
+
+  <div class="plans" id="plans-grid">
+    <!-- Rendered by JS -->
+  </div>
+
+  <p class="trial-note">
+    Questions? Email <a href="mailto:{{ contact_email }}" style="color:#008060">{{ contact_email }}</a>
+  </p>
+
+  <div class="faq">
+    <h2>Frequently asked questions</h2>
+    <div class="faq-item">
+      <h3>What happens after the free trial?</h3>
+      <p>At the end of your 7-day trial you'll be charged your plan's monthly rate via Shopify Billing. You can cancel before then with no charge.</p>
+    </div>
+    <div class="faq-item">
+      <h3>Can I upgrade or downgrade at any time?</h3>
+      <p>Yes. Upgrades take effect immediately. Downgrades take effect at the start of your next billing cycle.</p>
+    </div>
+    <div class="faq-item">
+      <h3>What counts as a "channel"?</h3>
+      <p>Google Shopping, Amazon Seller Central, and Meta (Facebook &amp; Instagram) Shopping are the three supported channels. Each requires different compliance rules.</p>
+    </div>
+    <div class="faq-item">
+      <h3>What does "auto-fix" mean?</h3>
+      <p>Auto-fix automatically creates or updates missing policy pages on your store using your shop's info — no manual copy-paste required. One-click fixes apply product-level corrections with a single button press.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+var SHOP    = "{{ shop }}";
+var HOST    = "{{ host }}";
+var APP_URL = "{{ app_url }}";
+var API_KEY = "{{ api_key }}";
+var CURRENT_PLAN_KEY = "{{ current_plan_key }}";
+
+var PLANS = [
+  {
+    key: "free",
+    name: "Free",
+    price: 0,
+    desc: "Try SellerShield with no commitment.",
+    features: [
+      { text: "1 scan per month",         ok: true },
+      { text: "Google Shopping rules",     ok: true },
+      { text: "Compliance score + grade",  ok: true },
+      { text: "Auto-fix policy pages",     ok: false },
+      { text: "Amazon & Meta channels",    ok: false },
+      { text: "One-click product fixes",   ok: false },
+      { text: "Daily / weekly scans",      ok: false },
+      { text: "Email alerts",              ok: false },
+    ],
+    popular: false,
+    cta: "Get started free",
+  },
+  {
+    key: "starter",
+    name: "Starter",
+    price: 29,
+    desc: "Essential compliance for growing stores.",
+    features: [
+      { text: "4 scans per month",         ok: true },
+      { text: "Google Shopping rules",     ok: true },
+      { text: "Auto-fix policy pages",     ok: true },
+      { text: "Weekly scheduled scans",    ok: true },
+      { text: "Email alerts",              ok: true },
+      { text: "Amazon & Meta channels",    ok: false },
+      { text: "One-click product fixes",   ok: false },
+      { text: "Appeal guidance",           ok: false },
+    ],
+    popular: false,
+    cta: "Start free trial",
+  },
+  {
+    key: "growth",
+    name: "Growth",
+    price: 69,
+    desc: "Multi-channel compliance for scaling brands.",
+    features: [
+      { text: "30 scans per month",        ok: true },
+      { text: "Google + Amazon + Meta",    ok: true },
+      { text: "Auto-fix policy pages",     ok: true },
+      { text: "One-click product fixes",   ok: true },
+      { text: "Daily scheduled scans",     ok: true },
+      { text: "Email alerts",              ok: true },
+      { text: "Appeal guidance",           ok: false },
+      { text: "Priority support",          ok: false },
+    ],
+    popular: true,
+    cta: "Start free trial",
+  },
+  {
+    key: "pro",
+    name: "Pro",
+    price: 99,
+    desc: "Full protection for high-volume sellers.",
+    features: [
+      { text: "Unlimited scans",           ok: true },
+      { text: "Google + Amazon + Meta",    ok: true },
+      { text: "Auto-fix policy pages",     ok: true },
+      { text: "One-click product fixes",   ok: true },
+      { text: "Real-time monitoring",      ok: true },
+      { text: "Email + Slack alerts",      ok: true },
+      { text: "Appeal guidance",           ok: true },
+      { text: "Priority support",          ok: true },
+    ],
+    popular: false,
+    cta: "Start free trial",
+  },
+];
+
+function toast(msg, type) {
+  var t = document.createElement("div");
+  t.className = "toast " + (type || "");
+  t.textContent = msg;
+  document.getElementById("toast-container").appendChild(t);
+  setTimeout(function() { t.remove(); }, 4000);
+}
+
+function renderPlans() {
+  var grid = document.getElementById("plans-grid");
+  grid.innerHTML = PLANS.map(function(p) {
+    var isCurrent = p.key === CURRENT_PLAN_KEY;
+    var isUpgrade = !isCurrent;
+    var badge = p.popular && !isCurrent ? '<div class="popular-badge">Most popular</div>' : "";
+    if (isCurrent) badge = '<div class="current-badge">Your plan</div>';
+
+    var features = p.features.map(function(f) {
+      var icon = f.ok ? '<span class="check">✓</span>' : '<span class="cross">✕</span>';
+      return '<li>' + icon + ' ' + f.text + '</li>';
+    }).join("");
+
+    var btnClass = isCurrent ? "current-plan" : (p.popular ? "primary" : "secondary");
+    var btnText  = isCurrent ? "Current plan" : p.cta;
+    var btnExtra = isCurrent ? "" : 'onclick="selectPlan(\'' + p.key + '\', this)"';
+
+    return '<div class="plan' + (p.popular ? ' popular' : '') + (isCurrent ? ' current' : '') + '">' +
+      badge +
+      '<div class="plan-name">' + p.name + '</div>' +
+      '<div class="plan-price">' + (p.price === 0 ? 'Free' : '$' + p.price) + (p.price > 0 ? '<span>/mo</span>' : '') + '</div>' +
+      '<p class="plan-desc">' + p.desc + '</p>' +
+      '<ul class="plan-features">' + features + '</ul>' +
+      '<button class="btn-plan ' + btnClass + '" ' + btnExtra + (isCurrent ? ' disabled' : '') + '>' + btnText + '</button>' +
+      '</div>';
+  }).join("");
+}
+
+function selectPlan(planKey, btn) {
+  btn.disabled = true;
+  var orig = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span> Redirecting…';
+
+  fetch(APP_URL + "/api/plan/upgrade", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Shopify-Shop-Domain": SHOP },
+    body: JSON.stringify({ shop: SHOP, plan: planKey }),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.error) {
+      toast(d.error, "error");
+      btn.disabled = false;
+      btn.textContent = orig;
+      return;
+    }
+    if (d.confirmation_url) {
+      // Redirect top-level for Shopify billing confirmation
+      try { window.top.location.href = d.confirmation_url; } catch(e) {
+        window.location.href = d.confirmation_url;
+      }
+      return;
+    }
+    if (d.success) {
+      toast("Plan updated!", "success");
+      setTimeout(function() { window.location.href = APP_URL + "/shopify/dashboard?shop=" + SHOP; }, 1500);
+    }
+  })
+  .catch(function() {
+    toast("Network error. Please try again.", "error");
+    btn.disabled = false;
+    btn.textContent = orig;
+  });
+}
+
+renderPlans();
+</script>
+</body>
+</html>
