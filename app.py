@@ -696,6 +696,7 @@ def _get_shop_pages(shop: str, token: str) -> list:
 def _create_shop_page(shop: str, token: str, title: str, body_html: str) -> dict:
     resp = _shopify_api(shop, token, "post", "pages.json",
                         body={"page": {"title": title, "body_html": body_html, "published": True}})
+    print(f"[autofix] create_page status={resp.status_code} body={resp.text[:300]}")
     if resp.status_code == 201:
         return resp.json().get("page", {})
     return {}
@@ -704,6 +705,7 @@ def _create_shop_page(shop: str, token: str, title: str, body_html: str) -> dict
 def _update_shop_page(shop: str, token: str, page_id: int, body_html: str) -> dict:
     resp = _shopify_api(shop, token, "put", f"pages/{page_id}.json",
                         body={"page": {"id": page_id, "body_html": body_html}})
+    print(f"[autofix] update_page status={resp.status_code} body={resp.text[:300]}")
     if resp.status_code == 200:
         return resp.json().get("page", {})
     return {}
