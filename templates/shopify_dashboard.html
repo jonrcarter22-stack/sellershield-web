@@ -290,15 +290,19 @@ body {
         3. Set the page title, paste the content, and click <strong>Save</strong>
       </div>
 
-      <div style="display:flex;gap:10px;justify-content:flex-end">
+      <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button onclick="document.getElementById('guided-fix-modal').style.display='none'"
                 style="background:#f1f2f3;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600">
           Close
         </button>
         <a id="gfm-deep-link" href="#" target="_blank"
-           style="background:#008060;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+           style="background:#005bd3;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
           Open Page Editor ↗
         </a>
+        <button id="gfm-confirm-btn" onclick="confirmGuidedFix()"
+                style="background:#008060;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600">
+          ✓ I've Created the Page
+        </button>
       </div>
     </div>
   </div>
@@ -560,12 +564,36 @@ function loadViolations() {
 }
 
 // ── Guided fix modal helpers ───────────────────────────────────
-function openGuidedFixModal(title, content, instructions, deepLink) {
+function openGuidedFixModal(title, content, instructions, deepLink, violationId) {
   document.getElementById("gfm-title").textContent = title;
   document.getElementById("gfm-instructions").textContent = instructions;
   document.getElementById("gfm-content").value = content;
   document.getElementById("gfm-deep-link").href = deepLink;
+  document.getElementById("guided-fix-modal").dataset.violationId = violationId || "";
+  var confirmBtn = document.getElementById("gfm-confirm-btn");
+  confirmBtn.disabled = false;
+  confirmBtn.textContent = "✓ I've Created the Page";
   document.getElementById("guided-fix-modal").style.display = "block";
+}
+
+function confirmGuidedFix() {
+  var modal = document.getElementById("guided-fix-modal");
+  var violationId = modal.dataset.violationId;
+  if (!violationId) { modal.style.display = "none"; return; }
+  var btn = document.getElementById("gfm-confirm-btn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving…';
+  api("POST", "/api/fix/" + violationId + "/confirm", { shop: SHOP }).then(function(d) {
+    if (d.error) { toast("Error: " + d.error, "error"); btn.disabled = false; btn.textContent = "✓ I've Created the Page"; return; }
+    modal.style.display = "none";
+    toast("Marked as fixed! We'll verify on your next scan.", "success");
+    loadViolations();
+    loadDashboard();
+  }).catch(function() {
+    toast("Network error.", "error");
+    btn.disabled = false;
+    btn.textContent = "✓ I've Created the Page";
+  });
 }
 
 function guidedFixCopy() {
@@ -597,7 +625,7 @@ function applyFix(violationId, fixType, btn) {
     }
     if (d.guided) {
       // Smart guided auto-fix: show content modal for merchant to paste
-      openGuidedFixModal(d.title, d.content, d.instructions, d.deep_link);
+      openGuidedFixModal(d.title, d.content, d.instructions, d.deep_link, violationId);
       return;
     }
     if (d.error) {
