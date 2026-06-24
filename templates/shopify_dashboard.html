@@ -648,14 +648,15 @@ function selectPlan(planKey, btn) {
   btn.disabled = true;
   var orig = btn.textContent;
   btn.innerHTML = '<span class="spinner"></span> Redirecting…';
-  api("POST", "/api/plan/upgrade", { shop: SHOP, plan: planKey }).then(function(d) {
+  api("POST", "/api/plan/upgrade", { shop: SHOP, plan: planKey, host: HOST }).then(function(d) {
     if (d.error) {
       toast(d.error, "error");
       btn.disabled = false; btn.textContent = orig; return;
     }
-    if (d.confirmation_url) {
-      try { window.top.location.href = d.confirmation_url; } catch(e) {
-        window.location.href = d.confirmation_url;
+    var redirect = d.confirmation_url || d.billing_auth_url;
+    if (redirect) {
+      try { window.top.location.href = redirect; } catch(e) {
+        window.location.href = redirect;
       }
       return;
     }
