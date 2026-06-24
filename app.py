@@ -342,7 +342,7 @@ def _db_complete_scan(scan_id: int, scores: dict, violation_count: int):
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE scans SET
-                        status = 'complete',
+                        status = 'done',
                         overall_score = %s,
                         google_score = %s,
                         amazon_score = %s,
@@ -407,17 +407,21 @@ def _db_get_violations(shop: str, channel: str = None, status: str = "open") -> 
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if channel:
                     cur.execute("""
-                        SELECT v.*, s.started_at as scan_time
+                        SELECT v.*, s.started_at as scan_time,
+                               f.id as fix_id
                         FROM violations v JOIN scans s ON v.scan_id = s.id
+                        LEFT JOIN fixes f ON f.violation_id = v.id AND f.status = 'applied'
                         WHERE v.shop=%s AND v.channel=%s AND v.status=%s
-                        ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, v.id DESC
+                        ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, v.id DESC
                     """, (shop, channel, status))
                 else:
                     cur.execute("""
-                        SELECT v.*, s.started_at as scan_time
+                        SELECT v.*, s.started_at as scan_time,
+                               f.id as fix_id
                         FROM violations v JOIN scans s ON v.scan_id = s.id
+                        LEFT JOIN fixes f ON f.violation_id = v.id AND f.status = 'applied'
                         WHERE v.shop=%s AND v.status=%s
-                        ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, v.id DESC
+                        ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, v.id DESC
                     """, (shop, status))
                 rows = cur.fetchall()
                 return [dict(r) for r in rows]
@@ -575,7 +579,7 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
             scanner = ComplianceScanner(shop, token)
             violations = scanner.run(channels=channels)
 
-        # ── Fallback: URL-based AuditEngine (20s hard timeout) ──────────────
+        # ── Fallback: URL-based AuditEngine (only if ComplianceScanner unavailable) ──
         if url and not (token and ComplianceScanner):
             _audit_result = [None]
             def _run_audit():
@@ -866,6 +870,15 @@ def _auto_fix_policy_page(shop: str, token: str, violation_id: int, rule_id: str
     return {"success": False, "error": "Shopify API error"}
 
 
+def _grade(score):
+    if score is None: return "—"
+    if score >= 90: return "A"
+    if score >= 80: return "B"
+    if score >= 70: return "C"
+    if score >= 60: return "D"
+    return "F"
+
+
 # ── API Routes ─────────────────────────────────────────────────────────────
 
 @app.route("/api/dashboard")
@@ -877,8 +890,9 @@ def api_dashboard():
     violations = _db_get_violations(shop)
 
     critical = sum(1 for v in violations if v["severity"] == "critical")
-    warnings = sum(1 for v in violations if v["severity"] == "warning")
-    infos    = sum(1 for v in violations if v["severity"] == "info")
+    high     = sum(1 for v in violations if v["severity"] == "high")
+    medium   = sum(1 for v in violations if v["severity"] == "medium")
+    low      = sum(1 for v in violations if v["severity"] == "low")
 
     # Compute next scan time based on plan
     next_scan = None
@@ -891,21 +905,50 @@ def api_dashboard():
         elif freq == "realtime":
             next_scan = "Continuous"
 
+    # Scans this month
+    scans_this_month = 0
+    fixed_count = 0
+    if DATABASE_URL and psycopg2:
+        try:
+            with _db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM scans WHERE shop=%s AND started_at >= NOW() - INTERVAL '30 days'",
+                        (shop,)
+                    )
+                    scans_this_month = cur.fetchone()[0]
+                    cur.execute(
+                        "SELECT COUNT(*) FROM violations WHERE shop=%s AND status='resolved'",
+                        (shop,)
+                    )
+                    fixed_count = cur.fetchone()[0]
+        except Exception as e:
+            print(f"[DB] dashboard counts error: {e}")
+
+    overall_score = scan.get("overall_score")
+
     return jsonify({
         "shop": shop,
         "plan": plan,
+        # Flat fields the dashboard JS reads directly
+        "overall_score": overall_score,
+        "overall_grade": _grade(overall_score),
+        "by_severity": {"critical": critical, "high": high, "medium": medium, "low": low},
+        "scans_this_month": scans_this_month,
+        "fixed_count": fixed_count,
+        # Nested scan detail
         "scan": {
             "id": scan.get("id"),
             "status": scan.get("status"),
-            "overall_score": scan.get("overall_score"),
+            "overall_score": overall_score,
             "google_score": scan.get("google_score"),
             "amazon_score": scan.get("amazon_score"),
             "meta_score": scan.get("meta_score"),
             "violation_count": scan.get("violation_count", 0),
-            "last_scanned": scan.get("completed_at", {}).isoformat() if scan.get("completed_at") else None,
+            "last_scanned": scan["completed_at"].isoformat() if scan.get("completed_at") else None,
             "next_scan": next_scan,
         },
-        "summary": {"critical": critical, "warning": warnings, "info": infos},
+        "summary": {"critical": critical, "high": high, "medium": medium, "low": low},
         "channels_available": plan.get("channels", ["google"]),
         "all_channels": ["google", "amazon", "meta"],
     })
@@ -950,7 +993,10 @@ def api_scan_status(scan_id):
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"error": "Not found"}), 404
-                return jsonify(dict(row))
+                r = dict(row)
+                # alias violation_count → violations_found for the dashboard toast
+                r["violations_found"] = r.get("violation_count", 0)
+                return jsonify(r)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1110,13 +1156,35 @@ def api_revert_fix(fix_id):
 @app.route("/api/history")
 @require_api_auth
 def api_fix_history():
+    """Return scan history (not fix history) for the dashboard timeline."""
     shop = request.shop
-    history = _db_get_fix_history(shop)
-    for item in history:
-        for k in ("applied_at", "reverted_at"):
-            if item.get(k) and hasattr(item[k], "isoformat"):
-                item[k] = item[k].isoformat()
-    return jsonify({"history": history})
+    if not DATABASE_URL or not psycopg2:
+        return jsonify({"history": []})
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, status, overall_score, violation_count,
+                           started_at, completed_at
+                    FROM scans WHERE shop=%s
+                    ORDER BY started_at DESC LIMIT 20
+                """, (shop,))
+                rows = cur.fetchall()
+        history = []
+        for r in rows:
+            r = dict(r)
+            history.append({
+                "id":              r["id"],
+                "channel":         "Full audit",
+                "scanned_at":      r["completed_at"].isoformat() if r.get("completed_at") else None,
+                "violations_found": r.get("violation_count", 0),
+                "overall_score":   r.get("overall_score") or 0,
+                "status":          r.get("status", ""),
+            })
+        return jsonify({"history": history})
+    except Exception as e:
+        print(f"[DB] scan history error: {e}")
+        return jsonify({"history": [], "error": str(e)})
 
 
 @app.route("/api/plan")
