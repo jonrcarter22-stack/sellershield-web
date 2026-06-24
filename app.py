@@ -1499,6 +1499,58 @@ def api_plan_upgrade():
     return jsonify({"billing_auth_url": billing_auth_url})
 
 
+@app.route("/api/plan/cancel", methods=["POST"])
+@require_api_auth
+def api_plan_cancel():
+    """Cancel the merchant's active subscription and revert to Free."""
+    shop  = request.shop
+    token = request.shop_token
+
+    # Look up existing charge_id
+    charge_id = None
+    if DATABASE_URL and psycopg2:
+        try:
+            with _db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT charge_id FROM shop_plans WHERE shop=%s", (shop,))
+                    row = cur.fetchone()
+            if row:
+                charge_id = row[0]
+        except Exception as e:
+            print(f"[cancel] DB lookup error: {e}")
+
+    # Cancel on Shopify if we have a subscription GID
+    if charge_id:
+        gql = """
+mutation AppSubscriptionCancel($id: ID!) {
+  appSubscriptionCancel(id: $id) {
+    userErrors { field message }
+    appSubscription { id status }
+  }
+}
+"""
+        try:
+            resp = requests.post(
+                f"https://{shop}/admin/api/2024-01/graphql.json",
+                headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                json={"query": gql, "variables": {"id": str(charge_id)}},
+                timeout=10,
+            )
+            print(f"[cancel] GraphQL status={resp.status_code} body={resp.text[:300]}")
+            data = resp.json().get("data", {}).get("appSubscriptionCancel", {})
+            errors = data.get("userErrors", [])
+            if errors:
+                return jsonify({"error": errors[0].get("message", "Cancellation failed")}), 400
+        except Exception as e:
+            print(f"[cancel] request error: {e}")
+            return jsonify({"error": "Could not reach Shopify billing API"}), 500
+
+    # Update DB to free
+    _db_set_plan(shop, "free", None)
+    print(f"[cancel] plan set to free for {shop}")
+    return jsonify({"success": True, "plan": "free"})
+
+
 @app.route("/shopify/plans")
 def shopify_plans():
     shop = request.args.get("shop", "").strip()
