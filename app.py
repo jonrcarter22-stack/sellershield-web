@@ -1442,6 +1442,23 @@ def setup_db():
         return f"<h2 style='color:red'>Error: {e}</h2>", 500
 
 
+@app.route("/clear-test-data")
+def clear_test_data():
+    """One-time route to wipe stale scan/violation data for a clean test."""
+    if not DATABASE_URL or not psycopg2:
+        return "No DATABASE_URL set", 500
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM fixes")
+                cur.execute("DELETE FROM violations")
+                cur.execute("DELETE FROM scans")
+            conn.commit()
+        return '<h2 style="font-family:sans-serif;color:green">✓ Test data cleared</h2><p style="font-family:sans-serif"><a href="/shopify/install?shop=sellershield-test.myshopify.com">Reinstall app</a></p>', 200
+    except Exception as e:
+        return f"<h2 style='color:red'>Error: {e}</h2>", 500
+
+
 def _verify_shopify_hmac(params: dict) -> bool:
     params = dict(params)
     hmac_value = params.pop("hmac", "")
