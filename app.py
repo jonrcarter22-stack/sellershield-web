@@ -1261,17 +1261,22 @@ mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean,
         json={"query": gql_query, "variables": gql_vars},
         timeout=10,
     )
+    print(f"[billing] GraphQL status={resp.status_code} body={resp.text[:500]}")
     if resp.status_code == 200:
         body = resp.json()
         sub_data = body.get("data", {}).get("appSubscriptionCreate", {})
         errors = sub_data.get("userErrors", [])
         if errors:
-            return jsonify({"error": f"Billing error: {errors[0].get('message', 'Unknown')}"}), 500
+            msg = errors[0].get('message', 'Unknown')
+            print(f"[billing] userErrors: {errors}")
+            return jsonify({"error": f"Billing error: {msg}"}), 500
         confirmation_url = sub_data.get("confirmationUrl", "")
         if confirmation_url:
             return jsonify({"confirmation_url": confirmation_url})
+        # No URL and no errors — return full body for debugging
+        return jsonify({"error": f"No confirmation URL. Response: {resp.text[:400]}"}), 500
 
-    return jsonify({"error": f"Billing API error: {resp.text[:300]}"}), 500
+    return jsonify({"error": f"Billing API error (HTTP {resp.status_code}): {resp.text[:300]}"}), 500
 
 
 @app.route("/shopify/plans")
