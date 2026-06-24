@@ -118,7 +118,7 @@ def _result_to_dict(result, audit_id: str) -> dict:
     }
 
 
-# ââ Web Audit Routes ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ââ Web Audit Routes âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.route("/")
 def index():
@@ -270,35 +270,35 @@ def shopify_dashboard():
     var apiKey = "{SHOPIFY_API_KEY}";
 
     function redirect() {{
-        // Method 1: App Bridge instance dispatch (correct API)
+        // Method 1: top-level navigation â iframe has no sandbox, this works
+        try {{
+            window.top.location.href = installUrl;
+            return;
+        }} catch(e1) {{}}
+
+        // Method 2: App Bridge instance dispatch
         try {{
             var AppBridge = window["app-bridge"];
             if (AppBridge && AppBridge.actions && AppBridge.actions.Redirect) {{
                 var createApp = AppBridge.default || AppBridge.createApp;
                 var app = createApp({{ apiKey: apiKey, host: host }});
-                var redirect = AppBridge.actions.Redirect.create(app);
-                redirect.dispatch(AppBridge.actions.Redirect.Action.REMOTE, installUrl);
+                var rb = AppBridge.actions.Redirect.create(app);
+                rb.dispatch(AppBridge.actions.Redirect.Action.REMOTE, installUrl);
                 return;
             }}
-        }} catch(e1) {{}}
-
-        // Method 2: postMessage directly to Shopify admin shell
-        try {{
-            window.parent.postMessage(JSON.stringify({{
-                message: "Shopify.API.remoteRedirect",
-                data: {{ location: installUrl }}
-            }}), "*");
-            return;
         }} catch(e2) {{}}
 
-        // Method 3: top-level nav (works outside iframe)
-        try {{ window.top.location.href = installUrl; }} catch(e3) {{
-            window.location.href = installUrl;
-        }}
+        // Method 3: postMessage to Shopify admin shell
+        window.parent.postMessage(JSON.stringify({{
+            message: "Shopify.API.remoteRedirect",
+            data: {{ location: installUrl }}
+        }}), "*");
+
+        // Method 4: fallback â navigate iframe itself (OAuth page may break out)
+        setTimeout(function() {{ window.location.href = installUrl; }}, 300);
     }}
 
-    // Give App Bridge script time to initialize
-    setTimeout(redirect, 200);
+    setTimeout(redirect, 100);
 }})();
 </script>
 </head><body><p style="font-family:sans-serif;padding:20px;">Authenticating with SellerShield...</p></body></html>"""
@@ -369,7 +369,7 @@ def privacy():
 <ul>
 <li>The store URL you submit for scanning</li>
 <li>Publicly accessible content from that URL</li>
-<li>Your selected marketplace platforms</i>
+<li>Your selected marketplace platforms</li>
 </ul>
 <p>We do <strong>not</strong> collect personal identifiers unless you contact us directly.</p>
 <h2>How We Use Your Data</h2>
