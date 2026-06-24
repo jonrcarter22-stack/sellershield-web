@@ -1206,14 +1206,113 @@ def api_plan():
     return jsonify({"plan": request.plan, "all_plans": PLAN_LIMITS})
 
 
+@app.route("/shopify/billing-auth")
+def shopify_billing_auth():
+    """Start a per-user OAuth flow to get a fresh online token for billing."""
+    shop     = request.args.get("shop", "").strip()
+    plan_key = request.args.get("plan", "").strip()
+    host     = request.args.get("host", "").strip()
+    if not shop or not plan_key:
+        return "Missing shop or plan", 400
+    auth_url = (
+        f"https://{shop}/admin/oauth/authorize"
+        f"?client_id={SHOPIFY_API_KEY}"
+        f"&scope={SHOPIFY_SCOPES}"
+        f"&redirect_uri={APP_URL}/billing/oauth-callback"
+        f"&grant_options%5B%5D=per-user"
+        f"&state={plan_key}"
+    )
+    return flask_redirect(auth_url)
+
+
+@app.route("/billing/oauth-callback")
+def billing_oauth_callback():
+    """Receive per-user token and immediately create billing subscription."""
+    shop     = request.args.get("shop", "")
+    code     = request.args.get("code", "")
+    plan_key = request.args.get("state", "")
+    host     = request.args.get("host", "")
+
+    if not shop or not code or not plan_key:
+        return "Invalid billing OAuth callback", 400
+    if not _verify_shopify_hmac(request.args.to_dict()):
+        return "HMAC validation failed", 403
+
+    # Exchange code for a fresh online (per-user) token
+    token_resp = http_req.post(
+        f"https://{shop}/admin/oauth/access_token",
+        json={"client_id": SHOPIFY_API_KEY, "client_secret": SHOPIFY_API_SECRET, "code": code},
+        timeout=10,
+    )
+    if token_resp.status_code != 200:
+        return f"Token exchange failed: {token_resp.text}", 500
+
+    online_token = token_resp.json().get("access_token", "")
+    if not online_token:
+        return "No access token returned", 500
+
+    plan_info = PLAN_LIMITS.get(plan_key)
+    if not plan_info:
+        return f"Unknown plan: {plan_key}", 400
+
+    price       = _PLAN_PRICES.get(plan_key, 0)
+    return_url  = f"{APP_URL}/billing/callback?shop={shop}&plan={plan_key}"
+
+    gql_query = """
+mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $trialDays: Int, $lineItems: [AppSubscriptionLineItemInput!]!) {
+  appSubscriptionCreate(name: $name, returnUrl: $returnUrl, test: $test, trialDays: $trialDays, lineItems: $lineItems) {
+    userErrors { field message }
+    confirmationUrl
+    appSubscription { id }
+  }
+}
+"""
+    gql_vars = {
+        "name":      f"SellerShield {plan_info['name']}",
+        "returnUrl": return_url,
+        "test":      bool(SHOPIFY_BILLING_TEST),
+        "trialDays": 7,
+        "lineItems": [{"plan": {"appRecurringPricingDetails": {
+            "price":    {"amount": str(price), "currencyCode": "USD"},
+            "interval": "EVERY_30_DAYS"
+        }}}]
+    }
+    resp = http_req.post(
+        f"https://{shop}/admin/api/2024-01/graphql.json",
+        headers={"X-Shopify-Access-Token": online_token, "Content-Type": "application/json"},
+        json={"query": gql_query, "variables": gql_vars},
+        timeout=10,
+    )
+    print(f"[billing-oauth] GraphQL status={resp.status_code} body={resp.text[:400]}")
+
+    if resp.status_code == 200:
+        sub_data = resp.json().get("data", {}).get("appSubscriptionCreate", {})
+        errors   = sub_data.get("userErrors", [])
+        if errors:
+            store_name = shop.replace(".myshopify.com", "")
+            return flask_redirect(
+                f"https://admin.shopify.com/store/{store_name}/apps/sellershield"
+                f"/shopify/dashboard?billing_error={errors[0].get('message','')}"
+            )
+        confirmation_url = sub_data.get("confirmationUrl", "")
+        if confirmation_url:
+            return flask_redirect(confirmation_url)
+
+    store_name = shop.replace(".myshopify.com", "")
+    return flask_redirect(
+        f"https://admin.shopify.com/store/{store_name}/apps/sellershield"
+        f"/shopify/dashboard?billing_error=Billing+API+error"
+    )
+
+
 @app.route("/api/plan/upgrade", methods=["POST"])
 @require_api_auth
 def api_plan_upgrade():
-    """Initiate a Shopify billing charge for a plan upgrade."""
-    shop  = request.shop
-    token = request.shop_token
-    data  = request.get_json(silent=True) or {}
+    """Return a billing-auth URL for the frontend to redirect to."""
+    shop     = request.shop
+    data     = request.get_json(silent=True) or {}
     new_plan_key = data.get("plan", "").lower()
+    host     = data.get("host", "")
 
     if new_plan_key not in PLAN_LIMITS:
         return jsonify({"error": f"Unknown plan: {new_plan_key}"}), 400
@@ -1225,58 +1324,12 @@ def api_plan_upgrade():
         _db_set_plan(shop, new_plan_key)
         return jsonify({"success": True, "plan": new_plan_key})
 
-    plan_info = PLAN_LIMITS[new_plan_key]
-    return_url = f"{APP_URL}/billing/callback?shop={shop}&plan={new_plan_key}"
-
-    # Use GraphQL appSubscriptionCreate (works for all app types)
-    gql_query = """
-mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $trialDays: Int, $lineItems: [AppSubscriptionLineItemInput!]!) {
-  appSubscriptionCreate(name: $name, returnUrl: $returnUrl, test: $test, trialDays: $trialDays, lineItems: $lineItems) {
-    userErrors { field message }
-    confirmationUrl
-    appSubscription { id }
-  }
-}
-"""
-    gql_vars = {
-        "name":       f"SellerShield {plan_info['name']}",
-        "returnUrl":  return_url,
-        "test":       bool(SHOPIFY_BILLING_TEST),
-        "trialDays":  7,
-        "lineItems":  [{
-            "plan": {
-                "appRecurringPricingDetails": {
-                    "price":    {"amount": str(price), "currencyCode": "USD"},
-                    "interval": "EVERY_30_DAYS"
-                }
-            }
-        }]
-    }
-    resp = http_req.post(
-        f"https://{shop}/admin/api/2024-01/graphql.json",
-        headers={
-            "X-Shopify-Access-Token": token,
-            "Content-Type": "application/json",
-        },
-        json={"query": gql_query, "variables": gql_vars},
-        timeout=10,
+    # Return a billing-auth URL — frontend will do window.top.location.href to it
+    billing_auth_url = (
+        f"{APP_URL}/shopify/billing-auth"
+        f"?shop={shop}&plan={new_plan_key}&host={host}"
     )
-    print(f"[billing] GraphQL status={resp.status_code} body={resp.text[:500]}")
-    if resp.status_code == 200:
-        body = resp.json()
-        sub_data = body.get("data", {}).get("appSubscriptionCreate", {})
-        errors = sub_data.get("userErrors", [])
-        if errors:
-            msg = errors[0].get('message', 'Unknown')
-            print(f"[billing] userErrors: {errors}")
-            return jsonify({"error": f"Billing error: {msg}"}), 500
-        confirmation_url = sub_data.get("confirmationUrl", "")
-        if confirmation_url:
-            return jsonify({"confirmation_url": confirmation_url})
-        # No URL and no errors — return full body for debugging
-        return jsonify({"error": f"No confirmation URL. Response: {resp.text[:400]}"}), 500
-
-    return jsonify({"error": f"Billing API error (HTTP {resp.status_code}): {resp.text[:300]}"}), 500
+    return jsonify({"billing_auth_url": billing_auth_url})
 
 
 @app.route("/shopify/plans")
