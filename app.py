@@ -576,7 +576,7 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
             violations = scanner.run(channels=channels)
 
         # ── Fallback: URL-based AuditEngine (20s hard timeout) ──────────────
-        if url:
+        if url and not (token and ComplianceScanner):
             _audit_result = [None]
             def _run_audit():
                 try:
