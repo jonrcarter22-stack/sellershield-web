@@ -751,6 +751,42 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
             vcount += 1
 
         _db_complete_scan(scan_id, scores, vcount)
+
+        # ── Verify previously confirmed/in-progress fixes ─────────────────────
+        # If the new scan no longer detects a rule_id that was "fixed", mark it
+        # resolved. If it's still detected, re-open it so the merchant knows the
+        # fix didn't stick.
+        if DATABASE_URL and psycopg2:
+            try:
+                new_rule_ids = {v["rule_id"] for v in violations}
+                with _db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT id, rule_id FROM violations "
+                            "WHERE shop=%s AND status IN ('guided_confirmed', 'in_progress')",
+                            (shop,)
+                        )
+                        pending_fixes = cur.fetchall()
+                        for row in pending_fixes:
+                            fix_id, fix_rule_id = row[0], row[1]
+                            if fix_rule_id not in new_rule_ids:
+                                # Scan no longer flags this rule → fix is confirmed
+                                cur.execute(
+                                    "UPDATE violations SET status='resolved' WHERE id=%s",
+                                    (fix_id,)
+                                )
+                                print(f"[scan] fix verified — {fix_rule_id} resolved for {shop}")
+                            else:
+                                # Scan still flags this rule → fix didn't stick, re-open
+                                cur.execute(
+                                    "UPDATE violations SET status='open' WHERE id=%s",
+                                    (fix_id,)
+                                )
+                                print(f"[scan] fix reverted — {fix_rule_id} re-opened for {shop}")
+                    conn.commit()
+            except Exception as ve:
+                print(f"[scan] fix verification error: {ve}")
+
     except Exception as e:
         print(f"[scan] _run_scan_for_shop error: {e}")
         _db_fail_scan(scan_id, str(e))
@@ -1027,7 +1063,11 @@ def api_dashboard():
         except Exception as e:
             print(f"[DB] dashboard counts error: {e}")
 
-    overall_score = scan.get("overall_score")
+    # Compute live score from current open violations (updates immediately when fixes are applied)
+    deductions = critical * 20 + high * 10 + medium * 5 + low * 2
+    live_score  = max(0, 100 - deductions)
+    # Fall back to scan score only if no violations have been loaded yet
+    overall_score = live_score if violations else (scan.get("overall_score") or 100)
 
     return jsonify({
         "shop": shop,
@@ -1234,16 +1274,21 @@ def api_apply_fix(violation_id):
     elif fix_type == "guided":
         deep_link = _GUIDED_DEEP_LINKS.get(rule_id, lambda s: f"https://{s}/admin")(shop)
         store_name = shop.replace(".myshopify.com", "")
-        # Build embedded admin deep link (works inside Shopify iframe)
-        embedded_link = f"https://admin.shopify.com/store/{store_name}" + \
-                        deep_link.split("/admin")[-1] if "/admin" in deep_link else deep_link
+        # Build absolute admin.shopify.com deep link (works from iframe)
+        if "/admin" in deep_link:
+            embedded_link = f"https://admin.shopify.com/store/{store_name}" + deep_link.split("/admin")[-1]
+        else:
+            embedded_link = deep_link
+        instructions = fix_details.get("instructions", "")
+        title = fix_details.get("title", v.get("title", "Fix Required"))
+        # Return guided: True so the frontend shows the step-by-step modal
+        # content is empty — the modal will hide Step 1 automatically
         return jsonify({
-            "success": False,
-            "pending": True,
-            "instructions": fix_details.get("instructions", "Manual action required."),
+            "guided": True,
+            "title": title,
+            "content": "",
             "deep_link": embedded_link,
-            "rule_id": rule_id,
-            "affected": fix_details.get("affected_titles", []),
+            "instructions": instructions or f"Follow the steps in Shopify Admin to resolve: {title}",
         })
 
     # ── Flagged (manual review only) ──────────────────────────────────────
@@ -1343,6 +1388,108 @@ def api_fix_history():
     except Exception as e:
         print(f"[DB] scan history error: {e}")
         return jsonify({"history": [], "error": str(e)})
+
+
+@app.route("/shopify/scan-report/<int:scan_id>")
+def scan_report_page(scan_id: int):
+    """Return a print-ready HTML report for a given scan. Opened in a new tab."""
+    shop = request.args.get("shop", "").strip()
+    if not shop or not DATABASE_URL or not psycopg2:
+        return "Not available", 404
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT * FROM scans WHERE id=%s AND shop=%s", (scan_id, shop)
+                )
+                scan = cur.fetchone()
+                if not scan:
+                    return "Scan not found", 404
+                cur.execute(
+                    "SELECT rule_id, severity, title, description, channel, status "
+                    "FROM violations WHERE scan_id=%s ORDER BY "
+                    "CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 "
+                    "WHEN 'medium' THEN 3 ELSE 4 END",
+                    (scan_id,)
+                )
+                viols = [dict(r) for r in cur.fetchall()]
+        scan = dict(scan)
+        score = scan.get("overall_score") or 0
+        grade = _grade(score)
+        scanned_at = scan.get("completed_at", scan.get("started_at", ""))
+        if hasattr(scanned_at, "strftime"):
+            scanned_at = scanned_at.strftime("%B %d, %Y at %H:%M UTC")
+
+        sev_colors = {"critical": "#d72c0d", "high": "#e98400", "medium": "#005bd3", "low": "#637381"}
+        rows_html = ""
+        for v in viols:
+            sev = v.get("severity", "low")
+            color = sev_colors.get(sev, "#637381")
+            status_badge = ""
+            if v.get("status") in ("resolved", "guided_confirmed"):
+                status_badge = ' <span style="background:#008060;color:#fff;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600">Fixed</span>'
+            rows_html += f"""
+            <tr>
+              <td style="padding:10px 12px;border-bottom:1px solid #e1e3e5">
+                <strong>{v.get('title','')}</strong>{status_badge}
+                <div style="font-size:12px;color:#637381;margin-top:2px">{v.get('description','')}</div>
+                <div style="font-size:11px;color:#aaa;margin-top:2px">{v.get('rule_id','')}</div>
+              </td>
+              <td style="padding:10px 12px;border-bottom:1px solid #e1e3e5;text-align:center">
+                <span style="background:{color};color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase">{sev}</span>
+              </td>
+              <td style="padding:10px 12px;border-bottom:1px solid #e1e3e5;text-align:center;font-size:12px;color:#637381">{v.get('channel','')}</td>
+            </tr>"""
+
+        score_color = "#008060" if score >= 80 else "#e98400" if score >= 60 else "#d72c0d"
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SellerShield Compliance Report — {shop}</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin:0; padding:32px; color:#1a1a1a; }}
+    h1 {{ font-size:22px; font-weight:700; margin:0 0 4px; }}
+    .meta {{ font-size:13px; color:#637381; margin-bottom:28px; }}
+    .score-row {{ display:flex; align-items:center; gap:24px; margin-bottom:28px; }}
+    .score-badge {{ font-size:48px; font-weight:800; color:{score_color}; line-height:1; }}
+    .score-label {{ font-size:13px; color:#637381; }}
+    table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+    th {{ background:#f6f6f7; text-align:left; padding:10px 12px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#637381; border-bottom:2px solid #e1e3e5; }}
+    @media print {{
+      body {{ padding:16px; }}
+      button {{ display:none; }}
+    }}
+  </style>
+</head>
+<body>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+    <div style="background:#005bd3;color:#fff;font-size:14px;font-weight:700;padding:6px 12px;border-radius:6px">SellerShield</div>
+    <h1>Compliance Report</h1>
+  </div>
+  <div class="meta">{shop} &nbsp;·&nbsp; {scanned_at} &nbsp;·&nbsp; Scan #{scan_id}</div>
+  <div class="score-row">
+    <div>
+      <div class="score-badge">{score} ({grade})</div>
+      <div class="score-label">Overall compliance score</div>
+    </div>
+    <div style="border-left:2px solid #e1e3e5;padding-left:24px">
+      <div style="font-size:13px"><strong>{sum(1 for v in viols if v.get('severity')=='critical')}</strong> Critical &nbsp; <strong>{sum(1 for v in viols if v.get('severity')=='high')}</strong> High &nbsp; <strong>{sum(1 for v in viols if v.get('severity')=='medium')}</strong> Medium &nbsp; <strong>{sum(1 for v in viols if v.get('severity')=='low')}</strong> Low</div>
+      <div style="font-size:12px;color:#637381;margin-top:4px">{len(viols)} total violations found</div>
+    </div>
+    <button onclick="window.print()" style="margin-left:auto;background:#005bd3;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">⬇ Save as PDF</button>
+  </div>
+  <table>
+    <thead><tr><th>Issue</th><th style="text-align:center">Severity</th><th style="text-align:center">Channel</th></tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  <div style="margin-top:32px;font-size:11px;color:#aaa;border-top:1px solid #e1e3e5;padding-top:16px">Generated by SellerShield · getsellershield.app</div>
+</body>
+</html>"""
+        return html, 200, {"Content-Type": "text/html"}
+    except Exception as e:
+        print(f"[scan-report] error: {e}")
+        return "Error generating report", 500
 
 
 @app.route("/api/plan")
