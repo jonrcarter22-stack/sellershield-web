@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SellerShield – Settings</title>
+
+  <!-- Shopify Polaris tokens -->
+  <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12.0.0/build/esm/styles.css" />
+  <script src="https://unpkg.com/@shopify/app-bridge@3/umd/index.js"></script>
+
+  <style>
+    :root {
+      --p-color-bg: #f6f6f7;
+      --p-color-bg-surface: #ffffff;
+      --p-color-bg-surface-hover: #f1f2f3;
+      --p-color-border: #e1e3e5;
+      --p-color-border-strong: #c9cccf;
+      --p-color-text: #202223;
+      --p-color-text-secondary: #6d7175;
+      --p-color-text-disabled: #8c9196;
+      --p-color-icon: #5c5f62;
+      --p-color-bg-fill-info: #e8f5e9;
+      --p-color-bg-fill-warning: #fff3cd;
+      --p-color-bg-fill-critical: #fce8e6;
+      --p-color-text-critical: #d72c0d;
+      --p-color-text-success: #007f5f;
+      --p-font-size-300: 12px;
+      --p-font-size-400: 13px;
+      --p-font-size-500: 14px;
+      --p-font-size-600: 16px;
+      --p-font-size-700: 18px;
+      --p-space-100: 4px;
+      --p-space-200: 8px;
+      --p-space-300: 12px;
+      --p-space-400: 16px;
+      --p-space-500: 20px;
+      --p-space-600: 24px;
+      --p-border-radius-200: 8px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: var(--p-font-size-500); color: var(--p-color-text); background: var(--p-color-bg); }
+
+    /* ── Layout ── */
+    .page-wrap { max-width: 960px; margin: 0 auto; padding: var(--p-space-600); }
+    .page-header { display: flex; align-items: center; gap: var(--p-space-300); margin-bottom: var(--p-space-600); }
+    .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--p-color-border); background: var(--p-color-bg-surface); color: var(--p-color-text); font-size: var(--p-font-size-400); cursor: pointer; text-decoration: none; transition: background .15s; }
+    .back-btn:hover { background: var(--p-color-bg-surface-hover); }
+    .page-title { font-size: var(--p-font-size-700); font-weight: 700; }
+
+    .layout { display: grid; grid-template-columns: 200px 1fr; gap: var(--p-space-600); }
+
+    /* ── Sidebar nav ── */
+    .sidebar { background: var(--p-color-bg-surface); border: 1px solid var(--p-color-border); border-radius: var(--p-border-radius-200); padding: var(--p-space-200) 0; height: fit-content; position: sticky; top: var(--p-space-600); }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px var(--p-space-400); font-size: var(--p-font-size-500); color: var(--p-color-text-secondary); cursor: pointer; transition: background .12s, color .12s; border-left: 3px solid transparent; }
+    .nav-item:hover { background: var(--p-color-bg-surface-hover); color: var(--p-color-text); }
+    .nav-item.active { color: #005bd3; font-weight: 600; border-left-color: #005bd3; background: #e8f0fd; }
+    .nav-item .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+
+    /* ── Content panels ── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .card { background: var(--p-color-bg-surface); border: 1px solid var(--p-color-border); border-radius: var(--p-border-radius-200); padding: var(--p-space-500); margin-bottom: var(--p-space-400); }
+    .card-title { font-size: var(--p-font-size-600); font-weight: 600; margin-bottom: var(--p-space-100); }
+    .card-subtitle { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-bottom: var(--p-space-400); }
+    .divider { border: none; border-top: 1px solid var(--p-color-border); margin: var(--p-space-400) 0; }
+
+    /* ── Form elements ── */
+    .field-row { margin-bottom: var(--p-space-400); }
+    .field-label { font-size: var(--p-font-size-400); font-weight: 600; color: var(--p-color-text); margin-bottom: 6px; }
+    .field-hint { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-bottom: 6px; }
+    .field-input { width: 100%; padding: 8px 12px; border: 1px solid var(--p-color-border-strong); border-radius: 6px; font-size: var(--p-font-size-500); color: var(--p-color-text); background: var(--p-color-bg-surface); transition: border .15s; outline: none; }
+    .field-input:focus { border-color: #005bd3; box-shadow: 0 0 0 2px rgba(0,91,211,.15); }
+
+    /* Threshold selector */
+    .threshold-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--p-space-200); }
+    .threshold-opt { border: 2px solid var(--p-color-border); border-radius: 8px; padding: 10px; cursor: pointer; text-align: center; transition: all .15s; }
+    .threshold-opt:hover { border-color: #005bd3; background: #f0f4ff; }
+    .threshold-opt.selected { border-color: #005bd3; background: #e8f0fd; }
+    .threshold-opt.off.selected { border-color: var(--p-color-text-secondary); background: #f3f3f3; }
+    .threshold-opt.critical.selected { border-color: #d72c0d; background: #fce8e6; }
+    .threshold-opt.high.selected { border-color: #e38300; background: #fff3cd; }
+    .threshold-opt.all.selected { border-color: #007f5f; background: #e8f5e9; }
+    .threshold-label { font-size: var(--p-font-size-400); font-weight: 600; margin-top: 4px; }
+    .threshold-desc { font-size: 11px; color: var(--p-color-text-secondary); margin-top: 2px; }
+    .threshold-badge { font-size: 18px; }
+
+    /* Toggle */
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: var(--p-space-300) 0; }
+    .toggle-info { flex: 1; }
+    .toggle-info .toggle-title { font-size: var(--p-font-size-500); font-weight: 500; }
+    .toggle-info .toggle-sub { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-top: 2px; }
+    .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; background: var(--p-color-border-strong); border-radius: 24px; cursor: pointer; transition: background .2s; }
+    .slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: transform .2s; }
+    input:checked + .slider { background: #005bd3; }
+    input:checked + .slider::before { transform: translateX(20px); }
+    input:disabled + .slider { opacity: .5; cursor: not-allowed; }
+
+    /* Scan frequency selector */
+    .freq-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--p-space-200); }
+    .freq-opt { border: 2px solid var(--p-color-border); border-radius: 8px; padding: 12px; cursor: pointer; text-align: center; transition: all .15s; }
+    .freq-opt:hover:not(.locked) { border-color: #005bd3; background: #f0f4ff; }
+    .freq-opt.selected { border-color: #005bd3; background: #e8f0fd; }
+    .freq-opt.locked { opacity: .55; cursor: not-allowed; }
+    .freq-icon { font-size: 22px; }
+    .freq-label { font-size: var(--p-font-size-400); font-weight: 600; margin-top: 4px; }
+    .freq-sub { font-size: 11px; color: var(--p-color-text-secondary); margin-top: 2px; }
+    .lock-badge { display: inline-block; background: #e0e0e0; color: var(--p-color-text-secondary); font-size: 10px; padding: 1px 6px; border-radius: 10px; margin-top: 4px; }
+
+    /* Channel toggles */
+    .channel-row { display: flex; align-items: center; justify-content: space-between; padding: var(--p-space-300) 0; border-bottom: 1px solid var(--p-color-border); }
+    .channel-row:last-child { border-bottom: none; }
+    .channel-meta { display: flex; align-items: center; gap: var(--p-space-300); }
+    .channel-icon { font-size: 22px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--p-color-bg); }
+    .channel-name { font-weight: 600; font-size: var(--p-font-size-500); }
+    .channel-desc { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); }
+    .plan-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 600; background: #e8f0fd; color: #005bd3; margin-left: 6px; }
+    .plan-badge.pro { background: #f3e8fd; color: #7b00d4; }
+
+    /* Plan card */
+    .plan-card { border: 2px solid var(--p-color-border); border-radius: 10px; padding: var(--p-space-400); margin-bottom: var(--p-space-300); transition: border .15s; }
+    .plan-card.current { border-color: #005bd3; background: #f0f4ff; }
+    .plan-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--p-space-200); }
+    .plan-name { font-weight: 700; font-size: var(--p-font-size-600); }
+    .plan-price { font-size: var(--p-font-size-700); font-weight: 700; color: #005bd3; }
+    .plan-price span { font-size: var(--p-font-size-400); font-weight: 400; color: var(--p-color-text-secondary); }
+    .plan-features { font-size: var(--p-font-size-400); color: var(--p-color-text-secondary); line-height: 1.7; }
+    .plan-features li { list-style: none; padding-left: 20px; position: relative; }
+    .plan-features li::before { content: "✓"; position: absolute; left: 0; color: #007f5f; font-weight: 700; }
+
+    /* Usage bar */
+    .usage-bar-wrap { margin: var(--p-space-200) 0; }
+    .usage-label { display: flex; justify-content: space-between; font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-bottom: 4px; }
+    .usage-bar { height: 6px; background: var(--p-color-border); border-radius: 3px; overflow: hidden; }
+    .usage-fill { height: 100%; background: #005bd3; border-radius: 3px; transition: width .4s; }
+
+    /* Danger zone */
+    .danger-card { border-color: #fce8e6; }
+    .danger-title { color: var(--p-color-text-critical); }
+    .danger-row { display: flex; align-items: center; justify-content: space-between; padding: var(--p-space-300) 0; border-bottom: 1px solid var(--p-color-border); }
+    .danger-row:last-child { border-bottom: none; }
+    .danger-info .danger-action { font-weight: 500; }
+    .danger-info .danger-desc { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-top: 2px; }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: var(--p-font-size-500); font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: all .15s; }
+    .btn-primary { background: #005bd3; color: white; border-color: #005bd3; }
+    .btn-primary:hover:not(:disabled) { background: #004bb5; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--p-color-bg-surface); color: var(--p-color-text); border-color: var(--p-color-border-strong); }
+    .btn-secondary:hover { background: var(--p-color-bg-surface-hover); }
+    .btn-danger { background: white; color: var(--p-color-text-critical); border-color: #f4a49d; }
+    .btn-danger:hover { background: #fce8e6; }
+    .btn-upgrade { background: #7b00d4; color: white; border-color: #7b00d4; font-size: var(--p-font-size-400); }
+    .btn-upgrade:hover { background: #6700b3; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1a1a1a; color: white; padding: 10px 20px; border-radius: 8px; font-size: var(--p-font-size-400); z-index: 9999; opacity: 0; transition: all .3s; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.error { background: #c0392b; }
+
+    /* Countdown */
+    .countdown { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-top: var(--p-space-200); }
+
+    /* Alert preview */
+    .alert-preview { background: #f9f9f9; border: 1px solid var(--p-color-border); border-radius: 6px; padding: var(--p-space-300); font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-top: var(--p-space-300); }
+    .alert-preview b { color: var(--p-color-text); }
+
+    @media (max-width: 680px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+      .threshold-grid { grid-template-columns: repeat(2, 1fr); }
+      .freq-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="page-header">
+    <a class="back-btn" href="#" onclick="goBack(event)">← Back</a>
+    <div class="page-title">Settings</div>
+  </div>
+
+  <div class="layout">
+
+    <!-- ── Sidebar nav ── -->
+    <nav class="sidebar" id="sidebar-nav">
+      <div class="nav-item active" data-panel="notifications" onclick="switchPanel('notifications')">
+        <span class="nav-icon">🔔</span> Notifications
+      </div>
+      <div class="nav-item" data-panel="schedule" onclick="switchPanel('schedule')">
+        <span class="nav-icon">🗓</span> Scan schedule
+      </div>
+      <div class="nav-item" data-panel="channels" onclick="switchPanel('channels')">
+        <span class="nav-icon">📡</span> Channels
+      </div>
+      <div class="nav-item" data-panel="account" onclick="switchPanel('account')">
+        <span class="nav-icon">👤</span> Account & billing
+      </div>
+    </nav>
+
+    <!-- ── Panels ── -->
+    <div id="panels-wrap">
+
+      <!-- ═══ Notifications ═══ -->
+      <div class="panel active" id="panel-notifications">
+
+        <div class="card">
+          <div class="card-title">Alert threshold</div>
+          <div class="card-subtitle">Choose which severity issues trigger an email alert.</div>
+
+          <div class="threshold-grid" id="threshold-grid">
+            <div class="threshold-opt off" data-value="off" onclick="selectThreshold('off')">
+              <div class="threshold-badge">🔕</div>
+              <div class="threshold-label">Off</div>
+              <div class="threshold-desc">No alerts</div>
+            </div>
+            <div class="threshold-opt critical" data-value="critical" onclick="selectThreshold('critical')">
+              <div class="threshold-badge">🚨</div>
+              <div class="threshold-label">Critical</div>
+              <div class="threshold-desc">Critical only</div>
+            </div>
+            <div class="threshold-opt high selected" data-value="high" onclick="selectThreshold('high')">
+              <div class="threshold-badge">⚠️</div>
+              <div class="threshold-label">High+</div>
+              <div class="threshold-desc">High & Critical</div>
+            </div>
+            <div class="threshold-opt all" data-value="all" onclick="selectThreshold('all')">
+              <div class="threshold-badge">📋</div>
+              <div class="threshold-label">All</div>
+              <div class="threshold-desc">Every issue</div>
+            </div>
+          </div>
+
+          <div id="alerts-upgrade-note" style="display:none; margin-top:14px; padding:10px 14px; background:var(--p-color-bg-fill-warning); border-radius:6px; font-size:12px;">
+            ⚠️ Email alerts require a paid plan. <a href="#" onclick="switchPanel('account'); return false;" style="color:#005bd3; font-weight:600;">Upgrade →</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Alert email</div>
+          <div class="card-subtitle">Override the default store contact email for alerts.</div>
+          <div class="field-row">
+            <div class="field-label">Email address</div>
+            <div class="field-hint">Leave blank to use the store's primary email (<span id="store-email-hint">your store email</span>).</div>
+            <input class="field-input" type="email" id="alert-email" placeholder="alerts@yourstore.com" />
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Notify on score change</div>
+          <div class="card-subtitle">Send an alert whenever your compliance score changes.</div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-title">Score change alerts</div>
+              <div class="toggle-sub">Alert when your score improves or drops by any amount after a scan.</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="notify-on-change" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Test alert</div>
+          <div class="card-subtitle">Send a test email to verify delivery is working.</div>
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <button class="btn btn-secondary" id="test-alert-btn" onclick="sendTestAlert()">✉ Send Test Alert</button>
+            <span id="test-alert-status" style="font-size:13px; color:var(--p-color-text-secondary);"></span>
+          </div>
+          <div id="test-alert-upgrade" style="display:none; margin-top:12px; font-size:12px; color:var(--p-color-text-secondary);">
+            ⚠️ Email alerts require a paid plan. <a href="#" onclick="switchPanel('account'); return false;" style="color:#005bd3;">Upgrade →</a>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:12px;">
+          <button class="btn btn-secondary" onclick="loadSettings()">Reset</button>
+          <button class="btn btn-primary" onclick="saveNotifications()">Save changes</button>
+        </div>
+
+      </div>
+
+      <!-- ═══ Scan schedule ═══ -->
+      <div class="panel" id="panel-schedule">
+
+        <div class="card">
+          <div class="card-title">Scan frequency</div>
+          <div class="card-subtitle">How often SellerShield automatically checks your store for compliance issues.</div>
+
+          <div class="freq-grid" id="freq-grid">
+            <div class="freq-opt selected" data-value="auto" onclick="selectFreq('auto')">
+              <div class="freq-icon">🤖</div>
+              <div class="freq-label">Smart</div>
+              <div class="freq-sub">Adapts based on changes</div>
+            </div>
+            <div class="freq-opt" data-value="daily" onclick="selectFreqGated('daily')">
+              <div class="freq-icon">📅</div>
+              <div class="freq-label">Daily</div>
+              <div class="freq-sub">Every 24 hours</div>
+              <div class="lock-badge" id="daily-lock" style="display:none">Growth+</div>
+            </div>
+            <div class="freq-opt" data-value="weekly" onclick="selectFreqGated('weekly')">
+              <div class="freq-icon">📆</div>
+              <div class="freq-label">Weekly</div>
+              <div class="freq-sub">Every 7 days</div>
+            </div>
+          </div>
+
+          <div id="freq-upgrade-note" style="display:none; margin-top:14px; padding:10px 14px; background:var(--p-color-bg-fill-warning); border-radius:6px; font-size:12px;">
+            ⚠️ Daily scans require a Growth or Pro plan. <a href="#" onclick="switchPanel('account'); return false;" style="color:#005bd3; font-weight:600;">Upgrade →</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Next scheduled scan</div>
+          <div class="countdown" id="next-scan-countdown">Loading…</div>
+          <div style="margin-top:var(--p-space-400);">
+            <button class="btn btn-secondary" id="manual-scan-btn" onclick="runManualScan()">▶ Run Scan Now</button>
+            <span id="manual-scan-status" style="font-size:13px; color:var(--p-color-text-secondary); margin-left:10px;"></span>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:12px;">
+          <button class="btn btn-secondary" onclick="loadSettings()">Reset</button>
+          <button class="btn btn-primary" onclick="saveSchedule()">Save changes</button>
+        </div>
+
+      </div>
+
+      <!-- ═══ Channels ═══ -->
+      <div class="panel" id="panel-channels">
+
+        <div class="card">
+          <div class="card-title">Monitored channels</div>
+          <div class="card-subtitle">Toggle which platforms SellerShield actively scans. Higher-tier plans unlock more channels.</div>
+
+          <div id="channel-list">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:12px;">
+          <button class="btn btn-secondary" onclick="loadSettings()">Reset</button>
+          <button class="btn btn-primary" onclick="saveChannels()">Save changes</button>
+        </div>
+
+      </div>
+
+      <!-- ═══ Account & billing ═══ -->
+      <div class="panel" id="panel-account">
+
+        <!-- Current plan -->
+        <div class="card">
+          <div class="card-title">Current plan</div>
+          <div class="card-subtitle" id="plan-desc">Your SellerShield subscription.</div>
+          <div id="plan-cards-wrap"><!-- rendered by JS --></div>
+        </div>
+
+        <!-- Usage -->
+        <div class="card">
+          <div class="card-title">Usage this month</div>
+          <div class="usage-bar-wrap">
+            <div class="usage-label"><span>Scans run</span><span id="scans-used">—</span></div>
+            <div class="usage-bar"><div class="usage-fill" id="scans-fill" style="width:0%"></div></div>
+          </div>
+          <div class="usage-bar-wrap" style="margin-top:12px;">
+            <div class="usage-label"><span>Violations detected</span><span id="violations-used">—</span></div>
+            <div class="usage-bar"><div class="usage-fill" id="violations-fill" style="width:0%"></div></div>
+          </div>
+        </div>
+
+        <!-- Danger zone -->
+        <div class="card danger-card">
+          <div class="card-title danger-title">Danger zone</div>
+          <div class="danger-row">
+            <div class="danger-info">
+              <div class="danger-action">Cancel subscription</div>
+              <div class="danger-desc">Downgrade to the Free plan. Your data is retained for 30 days.</div>
+            </div>
+            <button class="btn btn-danger" onclick="cancelSubscription()">Cancel plan</button>
+          </div>
+          <div class="danger-row">
+            <div class="danger-info">
+              <div class="danger-action">Delete all data</div>
+              <div class="danger-desc">Permanently remove all scans, violations, and settings for this store.</div>
+            </div>
+            <button class="btn btn-danger" onclick="confirmDeleteData()">Delete data</button>
+          </div>
+        </div>
+
+      </div>
+
+    </div><!-- /panels-wrap -->
+  </div><!-- /layout -->
+</div><!-- /page-wrap -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────
+var SHOP        = "{{ shop }}";
+var PLAN_NAME   = "{{ plan_name }}";
+var PLAN_CHANNELS     = {{ plan_channels | safe }};
+var PLAN_SCAN_FREQ    = "{{ plan_scan_freq }}";
+var PLAN_HAS_ALERTS   = {{ plan_has_alerts | safe }};
+
+var ALL_CHANNELS = [
+  { id: "google",   name: "Google Shopping",  icon: "🛍️",  desc: "Product listings, policy compliance",  plan: "free"   },
+  { id: "facebook", name: "Facebook & Instagram", icon: "📘", desc: "Shop listings and ad compliance",  plan: "growth" },
+  { id: "amazon",   name: "Amazon",           icon: "📦",  desc: "Listing standards and policy checks", plan: "growth" },
+  { id: "tiktok",   name: "TikTok Shop",      icon: "🎵",  desc: "Content policy and shop rules",       plan: "pro"    },
+  { id: "website",  name: "Storefront",       icon: "🌐",  desc: "Page content and legal pages",        plan: "free"   },
+];
+
+var PLAN_ORDER = { free: 0, growth: 1, pro: 2 };
+var userPlanLevel = PLAN_ORDER[PLAN_NAME.toLowerCase()] !== undefined ? PLAN_ORDER[PLAN_NAME.toLowerCase()] : 0;
+
+var settings = {};
+
+// ── Nav ────────────────────────────────────────────────────────
+function switchPanel(id) {
+  document.querySelectorAll(".nav-item").forEach(function(el) {
+    el.classList.toggle("active", el.dataset.panel === id);
+  });
+  document.querySelectorAll(".panel").forEach(function(el) {
+    el.classList.toggle("active", el.id === "panel-" + id);
+  });
+}
+
+// ── Back ───────────────────────────────────────────────────────
+function goBack(e) {
+  e.preventDefault();
+  var url = "/shopify/dashboard?shop=" + encodeURIComponent(SHOP);
+  try { window.top.location.href = url; } catch(err) { window.location.href = url; }
+}
+
+// ── Toast ──────────────────────────────────────────────────────
+function showToast(msg, isErr) {
+  var t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "toast" + (isErr ? " error" : "") + " show";
+  setTimeout(function() { t.className = "toast"; }, 3000);
+}
+
+// ── API helper ─────────────────────────────────────────────────
+function api(method, path, body) {
+  var opts = {
+    method: method,
+    headers: { "X-Shopify-Shop": SHOP, "Content-Type": "application/json" },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(path, opts).then(function(r) { return r.json(); });
+}
+
+// ── Load settings from backend ─────────────────────────────────
+function loadSettings() {
+  api("GET", "/api/settings").then(function(d) {
+    settings = d;
+    applySettings();
+  }).catch(function() {
+    showToast("Failed to load settings", true);
+  });
+  loadDashboard();
+}
+
+function applySettings() {
+  // Threshold
+  selectThreshold(settings.alert_threshold || "high", true);
+  // Email
+  var emailEl = document.getElementById("alert-email");
+  if (emailEl) emailEl.value = settings.alert_email || "";
+  // Notify on change
+  var noc = document.getElementById("notify-on-change");
+  if (noc) noc.checked = settings.notify_on_change !== false;
+  // Frequency
+  selectFreq(settings.scan_frequency || "auto", true);
+  // Channels
+  renderChannels(settings.channels_enabled || ["google"]);
+  // Alerts gate
+  if (!PLAN_HAS_ALERTS) {
+    document.getElementById("alerts-upgrade-note").style.display = "block";
+    document.getElementById("test-alert-upgrade").style.display = "block";
+    document.getElementById("test-alert-btn").disabled = true;
+    document.getElementById("test-alert-btn").title = "Requires a paid plan";
+    var noc2 = document.getElementById("notify-on-change");
+    if (noc2) noc2.disabled = true;
+  }
+}
+
+// ── Dashboard stats for Account panel ─────────────────────────
+function loadDashboard() {
+  api("GET", "/api/dashboard").then(function(d) {
+    // Scans
+    var scansEl = document.getElementById("scans-used");
+    var scanFill = document.getElementById("scans-fill");
+    if (scansEl && d.scan_count !== undefined) {
+      var limit = PLAN_NAME.toLowerCase() === "free" ? 5 : PLAN_NAME.toLowerCase() === "growth" ? 30 : 999;
+      var pct = Math.min(100, Math.round((d.scan_count / limit) * 100));
+      scansEl.textContent = d.scan_count + (limit < 999 ? " / " + limit : "");
+      if (scanFill) scanFill.style.width = pct + "%";
+    }
+    // Violations
+    var vEl = document.getElementById("violations-used");
+    var vFill = document.getElementById("violations-fill");
+    var vc = (d.critical || 0) + (d.high || 0) + (d.medium || 0) + (d.low || 0);
+    if (vEl) { vEl.textContent = vc; if (vFill) vFill.style.width = Math.min(100, vc * 5) + "%"; }
+    // Next scan
+    var ns = document.getElementById("next-scan-countdown");
+    if (ns) {
+      if (d.next_scan_at) {
+        var diff = new Date(d.next_scan_at) - new Date();
+        if (diff > 0) {
+          var h = Math.floor(diff / 3600000), m = Math.floor((diff % 3600000) / 60000);
+          ns.textContent = "Next scan in " + (h > 0 ? h + "h " : "") + m + "m";
+        } else {
+          ns.textContent = "Scan due soon";
+        }
+      } else {
+        ns.textContent = "No scan scheduled (Smart mode adapts automatically)";
+      }
+    }
+    // Plan cards
+    renderPlanCards(d.plan || {});
+  }).catch(function() {});
+}
+
+// ── Threshold ──────────────────────────────────────────────────
+function selectThreshold(val, silent) {
+  document.querySelectorAll(".threshold-opt").forEach(function(el) {
+    el.classList.toggle("selected", el.dataset.value === val);
+  });
+  if (!silent) settings.alert_threshold = val;
+}
+
+// ── Frequency ─────────────────────────────────────────────────
+var FREQ_PLAN_REQ = { auto: "free", weekly: "free", daily: "growth" };
+
+function selectFreqGated(val) {
+  var required = FREQ_PLAN_REQ[val] || "free";
+  if (PLAN_ORDER[required] > userPlanLevel) {
+    document.getElementById("freq-upgrade-note").style.display = "block";
+    return;
+  }
+  document.getElementById("freq-upgrade-note").style.display = "none";
+  selectFreq(val);
+}
+
+function selectFreq(val, silent) {
+  document.querySelectorAll(".freq-opt").forEach(function(el) {
+    el.classList.toggle("selected", el.dataset.value === val);
+  });
+  // Lock visuals
+  ["daily"].forEach(function(f) {
+    var lock = document.getElementById(f + "-lock");
+    var opt = document.querySelector('.freq-opt[data-value="' + f + '"]');
+    var req = PLAN_PLAN_REQ_LEVEL(f);
+    if (lock && opt) {
+      var isLocked = req > userPlanLevel;
+      lock.style.display = isLocked ? "inline-block" : "none";
+      opt.classList.toggle("locked", isLocked);
+    }
+  });
+  if (!silent) settings.scan_frequency = val;
+}
+
+function PLAN_PLAN_REQ_LEVEL(freq) {
+  var req = FREQ_PLAN_REQ[freq] || "free";
+  return PLAN_ORDER[req] || 0;
+}
+
+// ── Channels ──────────────────────────────────────────────────
+function renderChannels(enabledList) {
+  var list = document.getElementById("channel-list");
+  if (!list) return;
+  list.innerHTML = "";
+  ALL_CHANNELS.forEach(function(ch) {
+    var planReq = PLAN_ORDER[ch.plan] || 0;
+    var unlocked = planReq <= userPlanLevel;
+    var enabled = unlocked && enabledList.indexOf(ch.id) !== -1;
+    var badge = ch.plan !== "free" ? '<span class="plan-badge' + (ch.plan === "pro" ? " pro" : "") + '">' + ch.plan.charAt(0).toUpperCase() + ch.plan.slice(1) + '+ only</span>' : "";
+    var row = document.createElement("div");
+    row.className = "channel-row";
+    row.innerHTML = '<div class="channel-meta">' +
+      '<div class="channel-icon">' + ch.icon + '</div>' +
+      '<div>' +
+        '<div class="channel-name">' + ch.name + badge + '</div>' +
+        '<div class="channel-desc">' + ch.desc + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<label class="switch">' +
+      '<input type="checkbox" data-channel="' + ch.id + '"' + (enabled ? " checked" : "") + (unlocked ? "" : " disabled") + ' />' +
+      '<span class="slider"></span>' +
+    '</label>';
+    list.appendChild(row);
+  });
+}
+
+function getEnabledChannels() {
+  var result = [];
+  document.querySelectorAll("#channel-list input[data-channel]").forEach(function(inp) {
+    if (inp.checked) result.push(inp.dataset.channel);
+  });
+  return result;
+}
+
+// ── Plan cards ────────────────────────────────────────────────
+var PLANS_DEF = [
+  { id: "free",   name: "Free",   price: "$0",  period: "/mo", features: ["1 channel (Google Shopping)", "Manual scans only", "Up to 5 scans/month", "Basic compliance report"] },
+  { id: "growth", name: "Growth", price: "$29", period: "/mo", features: ["3 channels", "Daily auto-scans", "Email alerts", "Auto-fix engine", "PDF audit reports"] },
+  { id: "pro",    name: "Pro",    price: "$79", period: "/mo", features: ["All channels", "Hourly scans", "Priority support", "Multi-store", "Custom alert rules"] },
+];
+
+function renderPlanCards(plan) {
+  var wrap = document.getElementById("plan-cards-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  PLANS_DEF.forEach(function(p) {
+    var isCurrent = PLAN_NAME.toLowerCase() === p.id;
+    var card = document.createElement("div");
+    card.className = "plan-card" + (isCurrent ? " current" : "");
+    var feats = p.features.map(function(f) { return "<li>" + f + "</li>"; }).join("");
+    card.innerHTML = '<div class="plan-card-header">' +
+      '<div class="plan-name">' + p.name + (isCurrent ? ' <span style="font-size:11px;background:#005bd3;color:white;padding:2px 8px;border-radius:10px;margin-left:6px;">Current</span>' : "") + '</div>' +
+      '<div class="plan-price">' + p.price + '<span>' + p.period + '</span></div>' +
+    '</div>' +
+    '<ul class="plan-features">' + feats + '</ul>' +
+    (!isCurrent ? '<div style="margin-top:12px;"><button class="btn ' + (PLAN_ORDER[p.id] > userPlanLevel ? "btn-upgrade" : "btn-secondary") + '" onclick="changePlan(\'' + p.id + '\')">' + (PLAN_ORDER[p.id] > userPlanLevel ? "⬆ Upgrade to " : "⬇ Downgrade to ") + p.name + '</button></div>' : "") +
+    '';
+    wrap.appendChild(card);
+  });
+}
+
+// ── Save handlers ──────────────────────────────────────────────
+function saveNotifications() {
+  var payload = {
+    alert_threshold: settings.alert_threshold || "high",
+    alert_email: document.getElementById("alert-email").value.trim() || null,
+    notify_on_change: document.getElementById("notify-on-change").checked,
+  };
+  api("POST", "/api/settings", payload).then(function(d) {
+    if (d.success) showToast("Notification settings saved ✓");
+    else showToast(d.error || "Save failed", true);
+  }).catch(function() { showToast("Save failed", true); });
+}
+
+function saveSchedule() {
+  var sel = document.querySelector(".freq-opt.selected");
+  var payload = { scan_frequency: sel ? sel.dataset.value : "auto" };
+  api("POST", "/api/settings", payload).then(function(d) {
+    if (d.success) showToast("Scan schedule saved ✓");
+    else showToast(d.error || "Save failed", true);
+  }).catch(function() { showToast("Save failed", true); });
+}
+
+function saveChannels() {
+  var payload = { channels_enabled: getEnabledChannels() };
+  api("POST", "/api/settings", payload).then(function(d) {
+    if (d.success) showToast("Channel settings saved ✓");
+    else showToast(d.error || "Save failed", true);
+  }).catch(function() { showToast("Save failed", true); });
+}
+
+// ── Test alert ─────────────────────────────────────────────────
+function sendTestAlert() {
+  if (!PLAN_HAS_ALERTS) return;
+  var btn = document.getElementById("test-alert-btn");
+  var status = document.getElementById("test-alert-status");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  status.textContent = "";
+  api("POST", "/api/test-alert", {}).then(function(d) {
+    btn.disabled = false;
+    btn.textContent = "✉ Send Test Alert";
+    if (d.success) {
+      status.textContent = "✓ Sent to " + (d.sent_to || "your email");
+      showToast("Test alert sent ✓");
+    } else {
+      status.textContent = d.error || "Failed";
+      showToast(d.error || "Send failed", true);
+    }
+  }).catch(function() {
+    btn.disabled = false;
+    btn.textContent = "✉ Send Test Alert";
+    status.textContent = "Error";
+    showToast("Failed to send alert", true);
+  });
+}
+
+// ── Manual scan ────────────────────────────────────────────────
+function runManualScan() {
+  var btn = document.getElementById("manual-scan-btn");
+  var status = document.getElementById("manual-scan-status");
+  btn.disabled = true;
+  btn.textContent = "⏳ Scanning…";
+  status.textContent = "";
+  api("POST", "/api/scan", {}).then(function(d) {
+    btn.disabled = false;
+    btn.textContent = "▶ Run Scan Now";
+    if (d.scan_id) {
+      status.textContent = "✓ Scan complete";
+      showToast("Scan complete ✓");
+    } else {
+      status.textContent = d.error || "Scan failed";
+      showToast(d.error || "Scan failed", true);
+    }
+  }).catch(function() {
+    btn.disabled = false;
+    btn.textContent = "▶ Run Scan Now";
+    status.textContent = "Error";
+    showToast("Scan failed", true);
+  });
+}
+
+// ── Plan change / cancel / delete ─────────────────────────────
+function changePlan(planId) {
+  if (!confirm("Switch to the " + planId + " plan?")) return;
+  api("POST", "/api/billing/change", { plan: planId }).then(function(d) {
+    if (d.confirmation_url) {
+      try { window.top.location.href = d.confirmation_url; }
+      catch(err) { window.location.href = d.confirmation_url; }
+    } else if (d.success) {
+      showToast("Plan updated ✓");
+      setTimeout(function() { window.location.reload(); }, 1000);
+    } else {
+      showToast(d.error || "Change failed", true);
+    }
+  }).catch(function() { showToast("Request failed", true); });
+}
+
+function cancelSubscription() {
+  if (!confirm("Cancel your subscription and downgrade to Free? Your data will be kept for 30 days.")) return;
+  changePlan("free");
+}
+
+function confirmDeleteData() {
+  var confirmed = prompt("Type DELETE to permanently remove all your SellerShield data:");
+  if (confirmed !== "DELETE") return;
+  api("POST", "/api/account/delete-data", {}).then(function(d) {
+    if (d.success) {
+      showToast("Data deleted");
+      setTimeout(function() { window.location.reload(); }, 1500);
+    } else {
+      showToast(d.error || "Delete failed", true);
+    }
+  }).catch(function() { showToast("Request failed", true); });
+}
+
+// ── Init ───────────────────────────────────────────────────────
+loadSettings();
+</script>
+</body>
+</html>
