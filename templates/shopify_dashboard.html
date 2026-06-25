@@ -764,10 +764,9 @@ function loadDashboard() {
       banner.classList.add("upgrade");
     }
 
-    // Channels from plan
+    // Channels from plan (always show all plan channels as tabs)
     if (plan.channels) {
       allChannels = plan.channels;
-      renderChannelTabs();
     }
   }).catch(function() {});
 }
@@ -801,12 +800,37 @@ function loadViolations() {
   var container = document.getElementById("violations-container");
   container.innerHTML = '<div class="empty-state"><div class="spinner dark" style="width:20px;height:20px;margin:0 auto 12px"></div><p>Loading…</p></div>';
 
-  api("GET", "/api/violations?" + params.toString()).then(function(d) {
+  // Always fetch all channels so we can build tabs from actual data
+  var allParams = new URLSearchParams({ shop: SHOP });
+  if (severity) allParams.set("severity", severity);
+  if (status)   allParams.set("status", status);
+
+  api("GET", "/api/violations?" + allParams.toString()).then(function(d) {
     var violations = d.violations || [];
-    if (!violations.length) {
+
+    // Build channel tabs from channels that actually have violations
+    var channelsWithViolations = [];
+    var seen = {};
+    violations.forEach(function(v) {
+      if (v.channel && !seen[v.channel]) { seen[v.channel] = true; channelsWithViolations.push(v.channel); }
+    });
+    var ORDER = ["google", "amazon", "meta", "website"];
+    channelsWithViolations.sort(function(a, b) { return (ORDER.indexOf(a) - ORDER.indexOf(b)); });
+    if (channelsWithViolations.length > 1) {
+      allChannels = channelsWithViolations;
+    }
+    renderChannelTabs();
+
+    // Filter locally for the active channel tab
+    var filtered = activeChannel && activeChannel !== "all"
+      ? violations.filter(function(v) { return v.channel === activeChannel; })
+      : violations;
+
+    if (!filtered.length) {
       container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✅</div><h3>No violations found</h3><p>Run a scan to check your compliance status.</p><button class="btn btn-primary" onclick="runScan()">▶ Run Scan</button></div>';
       return;
     }
+    violations = filtered;
     var html = '<table class="violations-table"><thead><tr><th>Issue</th><th>Severity</th><th>Channel</th><th>Actions</th></tr></thead><tbody>';
     violations.forEach(function(v) {
       var locked  = v._locked;
