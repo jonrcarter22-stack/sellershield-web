@@ -729,13 +729,13 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
         install  = _db_get_install(shop)
         token    = install[0] if install else None
 
-        # Archive old open violations so they don't stack up across scans
+        # Archive ALL non-resolved violations so new scan starts clean (no duplicates)
         if DATABASE_URL and psycopg2:
             try:
                 with _db_conn() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
-                            "UPDATE violations SET status='superseded' WHERE shop=%s AND status='open'",
+                            "UPDATE violations SET status='superseded' WHERE shop=%s AND status IN ('open','guided_confirmed','in_progress')",
                             (shop,)
                         )
                     conn.commit()
@@ -802,8 +802,13 @@ def _run_scan_for_shop(shop: str, url: str, scan_id: int, plan: dict):
         for ch, counts in channel_counts.items():
             if ch in scores:
                 scores[ch] = _score_from_counts(counts)
-        active_scores = [s for s in [scores["google"], scores["amazon"], scores["meta"]] if s is not None]
-        scores["overall"] = int(sum(active_scores) / len(active_scores)) if active_scores else 100
+        # Overall score: same deduction formula as the live dashboard score
+        total = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for counts in channel_counts.values():
+            for sev in total:
+                total[sev] += counts.get(sev, 0)
+        deductions = total["critical"] * 20 + total["high"] * 10 + total["medium"] * 5 + total["low"] * 2
+        scores["overall"] = max(0, 100 - deductions)
 
         # ── Save violations to DB ─────────────────────────────────────────────
         vcount = 0
