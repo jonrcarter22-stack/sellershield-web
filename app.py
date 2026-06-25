@@ -355,6 +355,16 @@ def _init_extended_schema():
                         revert_data JSONB DEFAULT '{}'
                     );
                     CREATE INDEX IF NOT EXISTS fixes_shop_idx ON fixes(shop);
+
+                    CREATE TABLE IF NOT EXISTS shop_settings (
+                        shop TEXT PRIMARY KEY,
+                        alert_threshold TEXT DEFAULT 'high',
+                        alert_email TEXT,
+                        notify_on_change BOOLEAN DEFAULT TRUE,
+                        scan_frequency TEXT DEFAULT 'auto',
+                        channels_enabled JSONB DEFAULT '["google"]',
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    );
                 """)
             conn.commit()
     except Exception as e:
@@ -557,6 +567,66 @@ def _db_save_fix(shop: str, violation_id: int, fix_type: str,
     except Exception as e:
         print(f"[DB] save_fix error: {e}")
         return -1
+
+
+def _db_get_settings(shop: str) -> dict:
+    """Get shop notification/scan settings. Returns defaults if not set."""
+    defaults = {
+        "alert_threshold": "high",
+        "alert_email": None,
+        "notify_on_change": True,
+        "scan_frequency": "auto",
+        "channels_enabled": ["google"],
+    }
+    if not DATABASE_URL or not psycopg2:
+        return defaults
+    try:
+        with _db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM shop_settings WHERE shop=%s", (shop,))
+                row = cur.fetchone()
+                if row:
+                    result = {**defaults, **dict(row)}
+                    # Ensure channels_enabled is a list
+                    ce = result.get("channels_enabled")
+                    if isinstance(ce, str):
+                        try:
+                            result["channels_enabled"] = json.loads(ce)
+                        except Exception:
+                            result["channels_enabled"] = ["google"]
+                    return result
+    except Exception as e:
+        print(f"[DB] get_settings error: {e}")
+    return defaults
+
+
+def _db_save_settings(shop: str, settings: dict):
+    if not DATABASE_URL or not psycopg2:
+        return
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO shop_settings (shop, alert_threshold, alert_email, notify_on_change, scan_frequency, channels_enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (shop) DO UPDATE SET
+                        alert_threshold = EXCLUDED.alert_threshold,
+                        alert_email = EXCLUDED.alert_email,
+                        notify_on_change = EXCLUDED.notify_on_change,
+                        scan_frequency = EXCLUDED.scan_frequency,
+                        channels_enabled = EXCLUDED.channels_enabled,
+                        updated_at = NOW()
+                """, (
+                    shop,
+                    settings.get("alert_threshold", "high"),
+                    settings.get("alert_email"),
+                    settings.get("notify_on_change", True),
+                    settings.get("scan_frequency", "auto"),
+                    json.dumps(settings.get("channels_enabled", ["google"])),
+                ))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] save_settings error: {e}")
 
 
 def _db_revert_fix(fix_id: int) -> dict:
@@ -1952,6 +2022,61 @@ def api_test_alert():
 
     _send_alert_email(shop_email, subject, html)
     return jsonify({"success": True, "sent_to": shop_email})
+
+
+@app.route("/api/settings", methods=["GET"])
+@require_api_auth
+def api_get_settings():
+    """Return current shop settings."""
+    shop = request.shop
+    settings = _db_get_settings(shop)
+    # Remove internal fields
+    settings.pop("shop", None)
+    settings.pop("updated_at", None)
+    return jsonify(settings)
+
+
+@app.route("/api/settings", methods=["POST"])
+@require_api_auth
+def api_save_settings():
+    """Save shop settings."""
+    shop = request.shop
+    data = request.get_json(silent=True) or {}
+    allowed_keys = {"alert_threshold", "alert_email", "notify_on_change", "scan_frequency", "channels_enabled"}
+    filtered = {k: v for k, v in data.items() if k in allowed_keys}
+    # Validate alert_threshold
+    valid_thresholds = {"off", "critical", "high", "all"}
+    if "alert_threshold" in filtered and filtered["alert_threshold"] not in valid_thresholds:
+        return jsonify({"error": "Invalid alert_threshold"}), 400
+    # Merge with existing settings
+    current = _db_get_settings(shop)
+    current.update(filtered)
+    _db_save_settings(shop, current)
+    return jsonify({"success": True})
+
+
+@app.route("/shopify/settings")
+def shopify_settings():
+    shop = request.args.get("shop", "").strip()
+    if not shop:
+        return "Missing shop parameter", 400
+    token = _db_get_token(shop)
+    if not token:
+        install_url = f"/shopify/install?shop={shop}"
+        return flask_redirect(install_url)
+    plan = _get_plan(shop)
+    resp = make_response(render_template(
+        "shopify_settings.html",
+        shop=shop,
+        plan_name=plan.get("name", "Free"),
+        plan_channels=json.dumps(plan.get("channels", [])),
+        plan_scan_freq=plan.get("scan_frequency", "auto"),
+        plan_has_alerts=json.dumps(bool(plan.get("channels"))),
+    ))
+    resp.headers["Content-Security-Policy"] = (
+        "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+    )
+    return resp
 
 
 @app.route("/setup-db")
