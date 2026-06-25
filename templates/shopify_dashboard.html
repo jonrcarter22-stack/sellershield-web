@@ -253,10 +253,7 @@ body {
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="badge badge-plan" id="plan-badge">Loading plan…</span>
-      <button class="btn btn-secondary" id="alert-test-btn" onclick="sendTestAlert()" title="Send a test compliance alert email" style="display:none">
-        ✉ Test Alert
-      </button>
-      <button class="btn btn-primary" id="scan-btn" onclick="runScan()">
+<button class="btn btn-primary" id="scan-btn" onclick="runScan()">
         <span id="scan-btn-text">▶ Run Scan</span>
       </button>
       <a id="settings-link" href="#" onclick="openSettings(event)" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--p-color-border);background:var(--p-color-bg);color:var(--p-color-text-secondary);text-decoration:none;font-size:18px;transition:background .15s;" onmouseover="this.style.background='var(--p-color-bg-surface-hover)'" onmouseout="this.style.background='var(--p-color-bg)'">⚙</a>
