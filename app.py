@@ -2060,8 +2060,8 @@ def shopify_settings():
     shop = request.args.get("shop", "").strip()
     if not shop:
         return "Missing shop parameter", 400
-    token = _db_get_token(shop)
-    if not token:
+    install = _db_get_install(shop)
+    if not install:
         install_url = f"/shopify/install?shop={shop}"
         return flask_redirect(install_url)
     plan = _get_plan(shop)
