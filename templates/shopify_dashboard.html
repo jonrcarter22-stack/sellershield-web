@@ -307,7 +307,8 @@ body {
         <span style="font-size:26px">📄</span>
         <div>
           <h2 id="gfm-title" style="margin:0;font-size:17px;color:#1a1a1a;font-weight:700"></h2>
-          <p style="margin:2px 0 0;font-size:13px;color:#637381">Follow the 3 steps below to add this page to your store</p>
+          <p style="margin:2px 0 0;font-size:13px;color:#637381">Follow the steps below to resolve this issue</p>
+          <p id="gfm-instructions" style="display:none;margin:6px 0 0;font-size:13px;color:#444;background:#f4f6f8;border-radius:6px;padding:8px 10px"></p>
         </div>
       </div>
 
@@ -315,7 +316,7 @@ body {
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
 
         <!-- Step 1 -->
-        <div style="display:flex;align-items:flex-start;gap:12px;background:#f9fafb;border:1px solid #e1e3e5;border-radius:10px;padding:14px 16px">
+        <div id="gfm-step1" style="display:flex;align-items:flex-start;gap:12px;background:#f9fafb;border:1px solid #e1e3e5;border-radius:10px;padding:14px 16px">
           <div style="min-width:28px;height:28px;border-radius:50%;background:#005bd3;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">1</div>
           <div style="flex:1">
             <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:6px">Copy the generated page content</div>
@@ -334,8 +335,8 @@ body {
         <div style="display:flex;align-items:center;gap:12px;background:#f9fafb;border:1px solid #e1e3e5;border-radius:10px;padding:14px 16px">
           <div id="gfm-step2-num" style="min-width:28px;height:28px;border-radius:50%;background:#005bd3;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">2</div>
           <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px">Open Shopify's page editor</div>
-            <div style="font-size:12px;color:#637381">Paste the content, set the page title, then click Save</div>
+            <div id="gfm-step2-label" style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px">Open Shopify's page editor</div>
+            <div id="gfm-step2-sub" style="font-size:12px;color:#637381">Paste the content, set the page title, then click Save</div>
           </div>
           <a id="gfm-deep-link" href="#" target="_blank" onclick="launchGuidedFixEditor()"
              style="background:#005bd3;color:#fff;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0">
@@ -345,7 +346,7 @@ body {
 
         <!-- Step 3 -->
         <div style="display:flex;align-items:center;gap:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px">
-          <div style="min-width:28px;height:28px;border-radius:50%;background:#008060;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">3</div>
+          <div id="gfm-step3-num" style="min-width:28px;height:28px;border-radius:50%;background:#008060;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">3</div>
           <div style="flex:1">
             <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px">Mark as done</div>
             <div style="font-size:12px;color:#637381">Once you've saved the page in Shopify, click here to resolve the violation</div>
@@ -647,10 +648,27 @@ function loadViolations() {
 // ── Guided fix modal helpers ───────────────────────────────────
 function openGuidedFixModal(title, content, instructions, deepLink, violationId) {
   document.getElementById("gfm-title").textContent = title;
-  document.getElementById("gfm-content").value = content;
+  // Show/hide Step 1 depending on whether there's HTML content to copy
+  var step1 = document.getElementById("gfm-step1");
+  var hasContent = content && content.trim().length > 0;
+  if (step1) step1.style.display = hasContent ? "" : "none";
+  if (hasContent) {
+    document.getElementById("gfm-content").value = content;
+  }
+  // Show instructions under the title if provided and no copy step
+  var instrEl = document.getElementById("gfm-instructions");
+  if (instrEl) {
+    instrEl.textContent = instructions || "";
+    instrEl.style.display = (!hasContent && instructions) ? "block" : "none";
+  }
   // Pre-fill the page title in Shopify's new-page URL
   var url = deepLink + (deepLink.indexOf("?") === -1 ? "?" : "&") + "title=" + encodeURIComponent(title);
   document.getElementById("gfm-deep-link").href = url;
+  // Update Step 2 link label
+  var step2label = document.getElementById("gfm-step2-label");
+  if (step2label) step2label.textContent = hasContent ? "Open Shopify's page editor" : "Open Shopify Admin";
+  var step2sub = document.getElementById("gfm-step2-sub");
+  if (step2sub) step2sub.textContent = hasContent ? "Paste the content, set the page title, then click Save" : "Make the required change, then click Save";
   var modal = document.getElementById("guided-fix-modal");
   modal.dataset.violationId = violationId || "";
   modal.dataset.pageTitle   = title;
@@ -658,9 +676,11 @@ function openGuidedFixModal(title, content, instructions, deepLink, violationId)
   var confirmBtn = document.getElementById("gfm-confirm-btn");
   confirmBtn.disabled = false;
   confirmBtn.textContent = "✓ Done";
-  // Reset step 2 badge
+  // Reset step 2 badge number
   var s2num = document.getElementById("gfm-step2-num");
-  if (s2num) { s2num.textContent = "2"; s2num.style.background = "#005bd3"; }
+  if (s2num) { s2num.textContent = hasContent ? "2" : "1"; s2num.style.background = "#005bd3"; }
+  var s3num = document.getElementById("gfm-step3-num");
+  if (s3num) s3num.textContent = hasContent ? "3" : "2";
   // Hide bubble if modal is being reopened
   document.getElementById("gfm-bubble").style.display = "none";
   modal.style.display = "block";
