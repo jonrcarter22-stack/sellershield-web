@@ -83,11 +83,18 @@ body {
   box-shadow: var(--p-shadow-card);
   padding: var(--p-space-500);
 }
-.stat-label { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-bottom: var(--p-space-100); }
+.stat-label { font-size: var(--p-font-size-300); color: var(--p-color-text-secondary); margin-bottom: var(--p-space-100); display:flex; align-items:center; gap:5px; }
 .stat-value { font-size: 28px; font-weight: 700; color: var(--p-color-text); line-height: 1; }
 .stat-value.success { color: var(--p-color-text-success); }
 .stat-value.warning { color: var(--p-color-text-warning); }
 .stat-value.critical { color: var(--p-color-text-critical); }
+
+/* ── Stat card tooltips ─────────────────────────────────────── */
+.stat-tip { position:relative; display:inline-flex; }
+.stat-tip-icon { width:14px; height:14px; border-radius:50%; background:var(--p-color-border); color:#fff; font-size:9px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; cursor:default; line-height:1; flex-shrink:0; }
+.stat-tip-box { display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:#1a1a1a; color:#fff; font-size:11px; line-height:1.4; padding:7px 10px; border-radius:6px; width:200px; text-align:left; z-index:200; pointer-events:none; white-space:normal; }
+.stat-tip-box::after { content:""; position:absolute; top:100%; left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:#1a1a1a; }
+.stat-tip:hover .stat-tip-box { display:block; }
 
 /* ── Score ring ─────────────────────────────────────────────── */
 .score-card { display: flex; align-items: center; gap: var(--p-space-800); }
@@ -415,11 +422,26 @@ body {
 
   <!-- Stat cards -->
   <div class="stat-grid" id="stat-grid">
-    <div class="stat-card"><div class="stat-label">Overall Score</div><div class="stat-value" id="stat-score"><span class="skeleton" style="width:48px;height:28px;display:block"></span></div></div>
-    <div class="stat-card"><div class="stat-label">Critical Issues</div><div class="stat-value critical" id="stat-critical"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
-    <div class="stat-card"><div class="stat-label">Warnings</div><div class="stat-value warning" id="stat-warnings"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
-    <div class="stat-card"><div class="stat-label">Scans This Month</div><div class="stat-value" id="stat-scans"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
-    <div class="stat-card"><div class="stat-label">Auto-Fixed</div><div class="stat-value success" id="stat-fixed"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div></div>
+    <div class="stat-card">
+      <div class="stat-label">Overall Score <span class="stat-tip"><span class="stat-tip-icon">?</span><span class="stat-tip-box">Your compliance score out of 100. Calculated live from open violations: critical issues −20pts, high −10pts, medium −5pts, low −2pts. Improves as you fix issues.</span></span></div>
+      <div class="stat-value" id="stat-score"><span class="skeleton" style="width:48px;height:28px;display:block"></span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Critical Issues <span class="stat-tip"><span class="stat-tip-icon">?</span><span class="stat-tip-box">Violations that could get your listings suspended or account banned. Address these first.</span></span></div>
+      <div class="stat-value critical" id="stat-critical"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Warnings <span class="stat-tip"><span class="stat-tip-icon">?</span><span class="stat-tip-box">High-severity issues that put your store at risk. Not immediately suspendable but important to resolve.</span></span></div>
+      <div class="stat-value warning" id="stat-warnings"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Scans This Month <span class="stat-tip"><span class="stat-tip-icon">?</span><span class="stat-tip-box">Number of compliance scans run in the last 30 days. Your plan determines how often scans run automatically.</span></span></div>
+      <div class="stat-value" id="stat-scans"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Auto-Fixed <span class="stat-tip"><span class="stat-tip-icon">?</span><span class="stat-tip-box">Total violations you've resolved using SellerShield's guided or one-click fix tools.</span></span></div>
+      <div class="stat-value success" id="stat-fixed"><span class="skeleton" style="width:32px;height:28px;display:block"></span></div>
+    </div>
   </div>
 
   <!-- Violations -->
@@ -885,10 +907,16 @@ function loadHistory() {
     container.innerHTML = history.slice(0, 10).map(function(h) {
       var score = h.overall_score || 0;
       var scoreClass = score >= 80 ? "success" : score >= 60 ? "warning" : "critical";
+      var reportUrl = APP_URL + "/shopify/scan-report/" + h.id + "?shop=" + encodeURIComponent(SHOP);
       return '<div class="history-item">' +
-        '<div><div style="font-weight:600">' + escHtml(h.channel || "Full audit") + '</div>' +
-        '<div class="history-meta">' + escHtml(h.scanned_at ? h.scanned_at.substring(0,16).replace("T"," ") : "—") +
-        ' · ' + (h.violations_found || 0) + ' violations · ' + escHtml(h.status || "") + '</div></div>' +
+        '<div style="flex:1">' +
+          '<div style="font-weight:600">' + escHtml(h.channel || "Full audit") + '</div>' +
+          '<div class="history-meta">' + escHtml(h.scanned_at ? h.scanned_at.substring(0,16).replace("T"," ") : "—") +
+          ' · ' + (h.violations_found || 0) + ' violations · ' + escHtml(h.status || "") + '</div>' +
+        '</div>' +
+        '<a href="' + reportUrl + '" target="_blank" ' +
+          'style="background:#f1f2f3;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:600;color:#444;text-decoration:none;white-space:nowrap;margin-right:10px;display:inline-flex;align-items:center;gap:4px">' +
+          '↓ PDF</a>' +
         '<div class="history-score ' + scoreClass + '">' + score + '</div>' +
         '</div>';
     }).join("");
