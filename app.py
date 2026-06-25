@@ -2604,6 +2604,21 @@ _init_extended_schema()
 _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
 _scheduler_thread.start()
 
+@app.route("/admin/reset-scans")
+def admin_reset_scans():
+    secret = request.args.get("secret", "")
+    if secret != os.environ.get("ADMIN_SECRET", ""):
+        return "Forbidden", 403
+    try:
+        with _db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("TRUNCATE violations, scans, fixes RESTART IDENTITY CASCADE")
+            conn.commit()
+        return "Done — all scans, violations, and fixes wiped.", 200
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
