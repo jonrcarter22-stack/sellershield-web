@@ -259,6 +259,7 @@ body {
       <button class="btn btn-primary" id="scan-btn" onclick="runScan()">
         <span id="scan-btn-text">▶ Run Scan</span>
       </button>
+      <a id="settings-link" href="#" onclick="openSettings(event)" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--p-color-border);background:var(--p-color-bg);color:var(--p-color-text-secondary);text-decoration:none;font-size:18px;transition:background .15s;" onmouseover="this.style.background='var(--p-color-bg-surface-hover)'" onmouseout="this.style.background='var(--p-color-bg)'">⚙</a>
     </div>
   </div>
 
@@ -827,6 +828,15 @@ function revertFix(fixId, btn) {
     loadViolations();
     loadDashboard();
   }).catch(function() { toast("Network error reverting fix.", "error"); });
+}
+
+// ── Settings link ─────────────────────────────────────────────
+function openSettings(e) {
+  e.preventDefault();
+  var shop = new URLSearchParams(window.location.search).get("shop") || "";
+  var url = "/shopify/settings?shop=" + encodeURIComponent(shop);
+  // Shopify embedded: navigate top frame; fallback for dev
+  try { window.top.location.href = url; } catch(err) { window.location.href = url; }
 }
 
 // ── Test alert email ──────────────────────────────────────────
