@@ -264,47 +264,105 @@ body {
     <button class="btn btn-secondary" id="upgrade-btn" onclick="openUpgradeModal()">Upgrade Plan</button>
   </div>
 
+  <!-- ── Guided Fix Bubble (shown after editor opens) ────────────── -->
+  <div id="gfm-bubble" style="display:none;position:fixed;bottom:20px;right:20px;z-index:1002;width:280px">
+    <div style="background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.18);border:1px solid #e1e3e5;overflow:hidden">
+      <div style="background:#005bd3;padding:10px 14px;display:flex;align-items:center;gap:8px">
+        <span style="font-size:15px">📄</span>
+        <span id="gfm-bubble-title" style="color:#fff;font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <button onclick="reopenGuidedFixModal()" style="background:rgba(255,255,255,.2);border:none;border-radius:4px;color:#fff;font-size:11px;cursor:pointer;padding:3px 7px;font-weight:600">↗ Reopen</button>
+      </div>
+      <div style="padding:12px 14px">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+          <div id="gfm-bubble-s1" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#637381">
+            <div style="width:20px;height:20px;border-radius:50%;background:#008060;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✓</div>
+            Content copied
+          </div>
+          <div id="gfm-bubble-s2" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#637381">
+            <div style="width:20px;height:20px;border-radius:50%;background:#008060;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✓</div>
+            Editor opened
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#1a1a1a;font-weight:600">
+            <div style="width:20px;height:20px;border-radius:50%;background:#e1e3e5;color:#637381;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+            Waiting for you to save in Shopify…
+          </div>
+        </div>
+        <button id="gfm-bubble-done" onclick="confirmGuidedFix()"
+                style="width:100%;background:#008060;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-weight:600">
+          ✓ I've saved the page — mark as done
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Upgrade modal -->
   <!-- ── Guided Fix Modal ──────────────────────────────────────── -->
   <div id="guided-fix-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;overflow-y:auto">
-    <div style="background:#fff;border-radius:12px;max-width:680px;margin:40px auto;padding:32px;position:relative">
+    <div style="background:#fff;border-radius:12px;max-width:660px;margin:40px auto;padding:28px 28px 24px;position:relative">
       <button onclick="document.getElementById('guided-fix-modal').style.display='none'"
-              style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#637381">✕</button>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <span style="font-size:28px">📄</span>
-        <h2 id="gfm-title" style="margin:0;font-size:18px;color:#1a1a1a"></h2>
-      </div>
-      <p id="gfm-instructions" style="color:#637381;font-size:14px;margin:0 0 16px"></p>
+              style="position:absolute;top:14px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#637381;line-height:1">✕</button>
 
-      <div style="position:relative;margin-bottom:16px">
-        <label style="font-size:12px;font-weight:600;color:#637381;letter-spacing:.5px;text-transform:uppercase">Page Content (HTML)</label>
-        <textarea id="gfm-content" readonly
-                  style="width:100%;height:200px;font-family:monospace;font-size:12px;padding:12px;border:1px solid #dde1e6;border-radius:8px;resize:vertical;background:#f6f7f8;box-sizing:border-box;margin-top:6px;color:#1a1a1a"></textarea>
-        <button id="gfm-copy-btn" onclick="guidedFixCopy()"
-                style="position:absolute;bottom:10px;right:10px;background:#005bd3;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-weight:600">
-          Copy
-        </button>
+      <!-- Header -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <span style="font-size:26px">📄</span>
+        <div>
+          <h2 id="gfm-title" style="margin:0;font-size:17px;color:#1a1a1a;font-weight:700"></h2>
+          <p style="margin:2px 0 0;font-size:13px;color:#637381">Follow the 3 steps below to add this page to your store</p>
+        </div>
       </div>
 
-      <div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#1a3a5c">
-        <strong>Next steps:</strong><br>
-        1. Click <strong>Copy</strong> above to copy the page content<br>
-        2. Click <strong>Open Page Editor</strong> — Shopify's page creator will open<br>
-        3. Set the page title, paste the content, and click <strong>Save</strong>
+      <!-- Step bubbles -->
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+
+        <!-- Step 1 -->
+        <div style="display:flex;align-items:flex-start;gap:12px;background:#f9fafb;border:1px solid #e1e3e5;border-radius:10px;padding:14px 16px">
+          <div style="min-width:28px;height:28px;border-radius:50%;background:#005bd3;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">1</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:6px">Copy the generated page content</div>
+            <div style="position:relative">
+              <textarea id="gfm-content" readonly
+                        style="width:100%;height:130px;font-family:monospace;font-size:11px;padding:10px 10px 32px 10px;border:1px solid #dde1e6;border-radius:7px;resize:none;background:#fff;box-sizing:border-box;color:#1a1a1a;line-height:1.5"></textarea>
+              <button id="gfm-copy-btn" onclick="guidedFixCopy()"
+                      style="position:absolute;bottom:8px;right:8px;background:#005bd3;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600">
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div style="display:flex;align-items:center;gap:12px;background:#f9fafb;border:1px solid #e1e3e5;border-radius:10px;padding:14px 16px">
+          <div id="gfm-step2-num" style="min-width:28px;height:28px;border-radius:50%;background:#005bd3;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">2</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px">Open Shopify's page editor</div>
+            <div style="font-size:12px;color:#637381">Paste the content, set the page title, then click Save</div>
+          </div>
+          <a id="gfm-deep-link" href="#" target="_blank" onclick="launchGuidedFixEditor()"
+             style="background:#005bd3;color:#fff;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0">
+            Open Editor ↗
+          </a>
+        </div>
+
+        <!-- Step 3 -->
+        <div style="display:flex;align-items:center;gap:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px">
+          <div style="min-width:28px;height:28px;border-radius:50%;background:#008060;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">3</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px">Mark as done</div>
+            <div style="font-size:12px;color:#637381">Once you've saved the page in Shopify, click here to resolve the violation</div>
+          </div>
+          <button id="gfm-confirm-btn" onclick="confirmGuidedFix()"
+                  style="background:#008060;color:#fff;border:none;border-radius:7px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap;flex-shrink:0">
+            ✓ Done
+          </button>
+        </div>
+
       </div>
 
-      <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+      <!-- Footer -->
+      <div style="display:flex;justify-content:flex-end">
         <button onclick="document.getElementById('guided-fix-modal').style.display='none'"
-                style="background:#f1f2f3;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600">
+                style="background:#f1f2f3;border:none;border-radius:8px;padding:9px 18px;font-size:13px;cursor:pointer;font-weight:600;color:#444">
           Close
-        </button>
-        <a id="gfm-deep-link" href="#" target="_blank"
-           style="background:#005bd3;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
-          Open Page Editor ↗
-        </a>
-        <button id="gfm-confirm-btn" onclick="confirmGuidedFix()"
-                style="background:#008060;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;font-weight:600">
-          ✓ I've Created the Page
         </button>
       </div>
     </div>
@@ -589,33 +647,71 @@ function loadViolations() {
 // ── Guided fix modal helpers ───────────────────────────────────
 function openGuidedFixModal(title, content, instructions, deepLink, violationId) {
   document.getElementById("gfm-title").textContent = title;
-  document.getElementById("gfm-instructions").textContent = instructions;
   document.getElementById("gfm-content").value = content;
-  document.getElementById("gfm-deep-link").href = deepLink;
-  document.getElementById("guided-fix-modal").dataset.violationId = violationId || "";
+  // Pre-fill the page title in Shopify's new-page URL
+  var url = deepLink + (deepLink.indexOf("?") === -1 ? "?" : "&") + "title=" + encodeURIComponent(title);
+  document.getElementById("gfm-deep-link").href = url;
+  var modal = document.getElementById("guided-fix-modal");
+  modal.dataset.violationId = violationId || "";
+  modal.dataset.pageTitle   = title;
+  modal.dataset.deepLink    = url;
   var confirmBtn = document.getElementById("gfm-confirm-btn");
   confirmBtn.disabled = false;
-  confirmBtn.textContent = "✓ I've Created the Page";
+  confirmBtn.textContent = "✓ Done";
+  // Reset step 2 badge
+  var s2num = document.getElementById("gfm-step2-num");
+  if (s2num) { s2num.textContent = "2"; s2num.style.background = "#005bd3"; }
+  // Hide bubble if modal is being reopened
+  document.getElementById("gfm-bubble").style.display = "none";
+  modal.style.display = "block";
+}
+
+function launchGuidedFixEditor() {
+  var modal = document.getElementById("guided-fix-modal");
+  var title = modal.dataset.pageTitle || "Page";
+  // Mark step 2 as complete
+  var s2num = document.getElementById("gfm-step2-num");
+  if (s2num) { s2num.textContent = "✓"; s2num.style.background = "#008060"; }
+  // Collapse to bubble after tab has opened
+  setTimeout(function() {
+    modal.style.display = "none";
+    document.getElementById("gfm-bubble-title").textContent = title;
+    document.getElementById("gfm-bubble").style.display = "block";
+  }, 300);
+}
+
+function reopenGuidedFixModal() {
+  document.getElementById("gfm-bubble").style.display = "none";
   document.getElementById("guided-fix-modal").style.display = "block";
 }
 
 function confirmGuidedFix() {
-  var modal = document.getElementById("guided-fix-modal");
+  var modal  = document.getElementById("guided-fix-modal");
+  var bubble = document.getElementById("gfm-bubble");
   var violationId = modal.dataset.violationId;
-  if (!violationId) { modal.style.display = "none"; return; }
-  var btn = document.getElementById("gfm-confirm-btn");
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Saving…';
+  if (!violationId) { modal.style.display = "none"; bubble.style.display = "none"; return; }
+  // Spinner on whichever button is visible
+  var btn     = document.getElementById("gfm-confirm-btn");
+  var bubBtn  = document.getElementById("gfm-bubble-done");
+  var activeBtn = (bubble.style.display !== "none") ? bubBtn : btn;
+  activeBtn.disabled = true;
+  activeBtn.innerHTML = '<span class="spinner"></span> Saving…';
   api("POST", "/api/fix/" + violationId + "/confirm", { shop: SHOP }).then(function(d) {
-    if (d.error) { toast("Error: " + d.error, "error"); btn.disabled = false; btn.textContent = "✓ I've Created the Page"; return; }
-    modal.style.display = "none";
+    if (d.error) {
+      toast("Error: " + d.error, "error");
+      activeBtn.disabled = false;
+      activeBtn.textContent = "✓ Done";
+      return;
+    }
+    modal.style.display  = "none";
+    bubble.style.display = "none";
     toast("Marked as fixed! We'll verify on your next scan.", "success");
     loadViolations();
     loadDashboard();
   }).catch(function() {
     toast("Network error.", "error");
-    btn.disabled = false;
-    btn.textContent = "✓ I've Created the Page";
+    activeBtn.disabled = false;
+    activeBtn.textContent = "✓ Done";
   });
 }
 
