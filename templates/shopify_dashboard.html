@@ -831,9 +831,7 @@ function revertFix(fixId, btn) {
 function openSettings(e) {
   e.preventDefault();
   var shop = new URLSearchParams(window.location.search).get("shop") || "";
-  var url = "/shopify/settings?shop=" + encodeURIComponent(shop);
-  // Shopify embedded: navigate top frame; fallback for dev
-  try { window.top.location.href = url; } catch(err) { window.location.href = url; }
+  window.location.href = "/shopify/settings?shop=" + encodeURIComponent(shop);
 }
 
 // ── Test alert email ──────────────────────────────────────────
