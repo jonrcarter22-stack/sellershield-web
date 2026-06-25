@@ -1064,10 +1064,9 @@ def api_dashboard():
             print(f"[DB] dashboard counts error: {e}")
 
     # Compute live score from current open violations (updates immediately when fixes are applied)
-    deductions = critical * 20 + high * 10 + medium * 5 + low * 2
-    live_score  = max(0, 100 - deductions)
-    # Fall back to scan score only if no violations have been loaded yet
-    overall_score = live_score if violations else (scan.get("overall_score") or 100)
+    # 0 open violations = 100. Always use this so score reflects fixes without waiting for a rescan.
+    deductions    = critical * 20 + high * 10 + medium * 5 + low * 2
+    overall_score = max(0, 100 - deductions)
 
     return jsonify({
         "shop": shop,
