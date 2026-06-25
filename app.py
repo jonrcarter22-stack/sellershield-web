@@ -2064,14 +2064,14 @@ def shopify_settings():
     if not install:
         install_url = f"/shopify/install?shop={shop}"
         return flask_redirect(install_url)
-    plan = _get_plan(shop)
+    plan = _db_get_plan(shop)
     resp = make_response(render_template(
         "shopify_settings.html",
         shop=shop,
         plan_name=plan.get("name", "Free"),
         plan_channels=json.dumps(plan.get("channels", [])),
-        plan_scan_freq=plan.get("scan_frequency", "auto"),
-        plan_has_alerts=json.dumps(bool(plan.get("channels"))),
+        plan_scan_freq=plan.get("frequency", "manual"),
+        plan_has_alerts=json.dumps(plan.get("plan_name", "free") != "free"),
     ))
     resp.headers["Content-Security-Policy"] = (
         "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
