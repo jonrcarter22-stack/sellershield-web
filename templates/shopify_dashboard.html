@@ -233,6 +233,80 @@ body {
 }
 .channel-tab.active { background: #fff; color: var(--p-color-text); box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 
+/* ── Settings drawer ─────────────────────────────────────────── */
+.settings-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1100; }
+.settings-overlay.open { display:block; }
+.settings-drawer {
+  position:fixed; top:0; right:0; bottom:0; width:480px; max-width:100vw;
+  background:#f6f6f7; box-shadow:-4px 0 24px rgba(0,0,0,.18);
+  display:flex; flex-direction:column; transform:translateX(100%);
+  transition:transform .25s ease; z-index:1101; overflow:hidden;
+}
+.settings-overlay.open .settings-drawer { transform:translateX(0); }
+.settings-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 20px; background:#fff; border-bottom:1px solid #e1e3e5; flex-shrink:0;
+}
+.settings-header h2 { font-size:18px; font-weight:700; }
+.settings-close { background:none; border:none; font-size:22px; cursor:pointer; color:#6d7175; line-height:1; padding:4px; }
+.settings-nav {
+  display:flex; gap:0; background:#fff; border-bottom:1px solid #e1e3e5;
+  overflow-x:auto; flex-shrink:0;
+}
+.settings-nav-item {
+  padding:10px 16px; font-size:13px; font-weight:500; cursor:pointer;
+  color:#6d7175; border-bottom:2px solid transparent; white-space:nowrap;
+  transition:all .15s; background:none; border-top:none; border-left:none; border-right:none;
+}
+.settings-nav-item.active { color:#008060; border-bottom-color:#008060; font-weight:600; }
+.settings-body { flex:1; overflow-y:auto; padding:20px; }
+.settings-panel { display:none; }
+.settings-panel.active { display:block; }
+.s-card { background:#fff; border-radius:8px; border:1px solid #e1e3e5; padding:16px; margin-bottom:14px; }
+.s-card-title { font-size:14px; font-weight:600; margin-bottom:4px; }
+.s-card-sub { font-size:12px; color:#6d7175; margin-bottom:14px; }
+.s-field-label { font-size:12px; font-weight:600; margin-bottom:4px; }
+.s-field-hint { font-size:11px; color:#6d7175; margin-bottom:6px; }
+.s-input { width:100%; padding:7px 10px; border:1px solid #c9cccf; border-radius:6px; font-size:13px; }
+.s-input:focus { outline:none; border-color:#008060; box-shadow:0 0 0 2px rgba(0,128,96,.15); }
+.s-toggle-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; }
+.s-toggle-info .s-toggle-title { font-size:13px; font-weight:500; }
+.s-toggle-info .s-toggle-sub { font-size:11px; color:#6d7175; margin-top:2px; }
+.s-switch { position:relative; width:40px; height:22px; flex-shrink:0; }
+.s-switch input { opacity:0; width:0; height:0; }
+.s-slider { position:absolute; inset:0; background:#c9cccf; border-radius:22px; cursor:pointer; transition:background .2s; }
+.s-slider::before { content:""; position:absolute; width:16px; height:16px; left:3px; top:3px; background:#fff; border-radius:50%; transition:transform .2s; }
+input:checked + .s-slider { background:#008060; }
+input:checked + .s-slider::before { transform:translateX(18px); }
+input:disabled + .s-slider { opacity:.5; cursor:not-allowed; }
+.s-threshold-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.s-topt { border:2px solid #e1e3e5; border-radius:8px; padding:8px 4px; cursor:pointer; text-align:center; transition:all .15s; }
+.s-topt:hover { border-color:#008060; }
+.s-topt.selected { border-color:#008060; background:#e3f5ef; }
+.s-topt.sel-off.selected { border-color:#6d7175; background:#f1f2f4; }
+.s-topt.sel-critical.selected { border-color:#d72c0d; background:#fdf0ef; }
+.s-topt .s-topt-icon { font-size:16px; }
+.s-topt .s-topt-label { font-size:11px; font-weight:600; margin-top:3px; }
+.s-topt .s-topt-desc { font-size:10px; color:#6d7175; }
+.s-freq-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.s-fopt { border:2px solid #e1e3e5; border-radius:8px; padding:10px 6px; cursor:pointer; text-align:center; transition:all .15s; }
+.s-fopt:hover:not(.s-locked) { border-color:#008060; }
+.s-fopt.selected { border-color:#008060; background:#e3f5ef; }
+.s-fopt.s-locked { opacity:.5; cursor:not-allowed; }
+.s-fopt .s-fopt-icon { font-size:18px; }
+.s-fopt .s-fopt-label { font-size:11px; font-weight:600; margin-top:3px; }
+.s-fopt .s-fopt-sub { font-size:10px; color:#6d7175; }
+.s-lock-badge { display:inline-block; background:#e1e3e5; color:#6d7175; font-size:9px; padding:1px 5px; border-radius:8px; margin-top:3px; }
+.s-channel-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #e1e3e5; }
+.s-channel-row:last-child { border-bottom:none; }
+.s-channel-meta { display:flex; align-items:center; gap:10px; }
+.s-channel-icon { font-size:18px; width:30px; text-align:center; }
+.s-channel-name { font-size:13px; font-weight:600; }
+.s-channel-desc { font-size:11px; color:#6d7175; }
+.s-plan-badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; background:#e8f0fd; color:#005bd3; margin-left:5px; }
+.s-save-row { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+.s-note { padding:8px 12px; background:#fff3cd; border-radius:6px; font-size:12px; margin-top:10px; }
+
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .page { padding: var(--p-space-400); }
@@ -486,6 +560,109 @@ body {
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
 
+<!-- ── Settings drawer ── -->
+<div class="settings-overlay" id="settings-overlay" onclick="closeSettingsOnBackdrop(event)">
+  <div class="settings-drawer">
+    <div class="settings-header">
+      <h2>⚙ Settings</h2>
+      <button class="settings-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="settings-nav">
+      <button class="settings-nav-item active" data-spanel="notifications" onclick="switchSettingsPanel('notifications')">🔔 Notifications</button>
+      <button class="settings-nav-item" data-spanel="schedule" onclick="switchSettingsPanel('schedule')">🗓 Schedule</button>
+      <button class="settings-nav-item" data-spanel="channels" onclick="switchSettingsPanel('channels')">📡 Channels</button>
+    </div>
+    <div class="settings-body">
+
+      <!-- Notifications -->
+      <div class="settings-panel active" id="spanel-notifications">
+        <div class="s-card">
+          <div class="s-card-title">Alert threshold</div>
+          <div class="s-card-sub">Which severity issues trigger an email alert.</div>
+          <div class="s-threshold-grid">
+            <div class="s-topt sel-off" data-sval="off" onclick="selectSThreshold('off')">
+              <div class="s-topt-icon">🔕</div><div class="s-topt-label">Off</div><div class="s-topt-desc">No alerts</div>
+            </div>
+            <div class="s-topt sel-critical" data-sval="critical" onclick="selectSThreshold('critical')">
+              <div class="s-topt-icon">🚨</div><div class="s-topt-label">Critical</div><div class="s-topt-desc">Critical only</div>
+            </div>
+            <div class="s-topt selected" data-sval="high" onclick="selectSThreshold('high')">
+              <div class="s-topt-icon">⚠️</div><div class="s-topt-label">High+</div><div class="s-topt-desc">High & Critical</div>
+            </div>
+            <div class="s-topt" data-sval="all" onclick="selectSThreshold('all')">
+              <div class="s-topt-icon">📋</div><div class="s-topt-label">All</div><div class="s-topt-desc">Every issue</div>
+            </div>
+          </div>
+          <div id="s-alerts-upgrade" style="display:none;" class="s-note">⚠️ Email alerts require a paid plan.</div>
+        </div>
+        <div class="s-card">
+          <div class="s-card-title">Alert email</div>
+          <div class="s-card-sub">Override the store's contact email for alerts.</div>
+          <div class="s-field-label">Email address</div>
+          <input class="s-input" type="email" id="s-alert-email" placeholder="alerts@yourstore.com" />
+        </div>
+        <div class="s-card">
+          <div class="s-toggle-row">
+            <div class="s-toggle-info">
+              <div class="s-toggle-title">Score change alerts</div>
+              <div class="s-toggle-sub">Alert when your compliance score changes after a scan.</div>
+            </div>
+            <label class="s-switch"><input type="checkbox" id="s-notify-on-change" checked /><span class="s-slider"></span></label>
+          </div>
+        </div>
+        <div class="s-save-row">
+          <button class="btn btn-secondary btn-sm" onclick="loadSSettings()">Reset</button>
+          <button class="btn btn-primary btn-sm" onclick="saveNotificationSettings()">Save</button>
+        </div>
+      </div>
+
+      <!-- Schedule -->
+      <div class="settings-panel" id="spanel-schedule">
+        <div class="s-card">
+          <div class="s-card-title">Scan frequency</div>
+          <div class="s-card-sub">How often SellerShield automatically checks your store.</div>
+          <div class="s-freq-grid">
+            <div class="s-fopt selected" data-sfreq="auto" onclick="selectSFreq('auto')">
+              <div class="s-fopt-icon">🤖</div><div class="s-fopt-label">Smart</div><div class="s-fopt-sub">Adapts automatically</div>
+            </div>
+            <div class="s-fopt" data-sfreq="daily" onclick="selectSFreqGated('daily')">
+              <div class="s-fopt-icon">📅</div><div class="s-fopt-label">Daily</div><div class="s-fopt-sub">Every 24 hours</div>
+              <div class="s-lock-badge" id="s-daily-lock" style="display:none">Growth+</div>
+            </div>
+            <div class="s-fopt" data-sfreq="weekly" onclick="selectSFreq('weekly')">
+              <div class="s-fopt-icon">📆</div><div class="s-fopt-label">Weekly</div><div class="s-fopt-sub">Every 7 days</div>
+            </div>
+          </div>
+          <div id="s-freq-upgrade" style="display:none;" class="s-note">⚠️ Daily scans require a Growth or Pro plan.</div>
+        </div>
+        <div class="s-card">
+          <div class="s-card-title">Manual scan</div>
+          <button class="btn btn-secondary btn-sm" id="s-scan-btn" onclick="runScanFromSettings()">▶ Run Scan Now</button>
+          <span id="s-scan-status" style="font-size:12px;color:#6d7175;margin-left:8px;"></span>
+        </div>
+        <div class="s-save-row">
+          <button class="btn btn-secondary btn-sm" onclick="loadSSettings()">Reset</button>
+          <button class="btn btn-primary btn-sm" onclick="saveScheduleSettings()">Save</button>
+        </div>
+      </div>
+
+      <!-- Channels -->
+      <div class="settings-panel" id="spanel-channels">
+        <div class="s-card">
+          <div class="s-card-title">Monitored channels</div>
+          <div class="s-card-sub">Toggle which platforms are actively scanned.</div>
+          <div id="s-channel-list"></div>
+        </div>
+        <div class="s-save-row">
+          <button class="btn btn-secondary btn-sm" onclick="loadSSettings()">Reset</button>
+          <button class="btn btn-primary btn-sm" onclick="saveChannelSettings()">Save</button>
+        </div>
+      </div>
+
+    </div><!-- /settings-body -->
+  </div><!-- /settings-drawer -->
+</div><!-- /settings-overlay -->
+
 <script>
 // ── Config injected by Flask ──────────────────────────────────
 var SHOP    = "{{ shop }}";
@@ -552,6 +729,10 @@ function loadDashboard() {
     currentPlan = plan;
     var planName = (plan.name || "Free").toUpperCase();
     document.getElementById("plan-badge").textContent = "📋 " + planName;
+    // Expose plan info to settings drawer
+    sPlanName = (plan.plan_name || plan.name || "free").toLowerCase();
+    sPlanHasAlerts = sPlanName !== "free";
+    sPlanChannels = plan.channels || ["google"];
 
     // Test alert button — only for paid plans
     var alertBtn = document.getElementById("alert-test-btn");
@@ -827,11 +1008,133 @@ function revertFix(fixId, btn) {
   }).catch(function() { toast("Network error reverting fix.", "error"); });
 }
 
-// ── Settings link ─────────────────────────────────────────────
+// ── Settings drawer ───────────────────────────────────────────
+var sSettings = {};
+var sPlanName = "free";
+var sPlanChannels = ["google"];
+var sPlanHasAlerts = false;
+var S_ALL_CHANNELS = [
+  { id:"google",   name:"Google Shopping",     icon:"🛍️", desc:"Product listings & policy", plan:"free"   },
+  { id:"amazon",   name:"Amazon",              icon:"📦", desc:"Listing standards & policy",  plan:"growth" },
+  { id:"meta",     name:"Facebook/Instagram",  icon:"📘", desc:"Shop & ad compliance",        plan:"growth" },
+  { id:"website",  name:"Storefront",          icon:"🌐", desc:"Page content & legal pages",  plan:"free"   },
+];
+var S_PLAN_ORDER = { free:0, starter:1, growth:2, pro:3 };
+
 function openSettings(e) {
-  e.preventDefault();
-  var shop = new URLSearchParams(window.location.search).get("shop") || "";
-  window.location.href = "/shopify/settings?shop=" + encodeURIComponent(shop);
+  if (e) e.preventDefault();
+  document.getElementById("settings-overlay").classList.add("open");
+  loadSSettings();
+}
+function closeSettings() {
+  document.getElementById("settings-overlay").classList.remove("open");
+}
+function closeSettingsOnBackdrop(e) {
+  if (e.target === document.getElementById("settings-overlay")) closeSettings();
+}
+function switchSettingsPanel(id) {
+  document.querySelectorAll(".settings-nav-item").forEach(function(el) {
+    el.classList.toggle("active", el.dataset.spanel === id);
+  });
+  document.querySelectorAll(".settings-panel").forEach(function(el) {
+    el.classList.toggle("active", el.id === "spanel-" + id);
+  });
+}
+function loadSSettings() {
+  api("GET", "/api/settings").then(function(d) {
+    sSettings = d;
+    selectSThreshold(d.alert_threshold || "high", true);
+    document.getElementById("s-alert-email").value = d.alert_email || "";
+    document.getElementById("s-notify-on-change").checked = d.notify_on_change !== false;
+    selectSFreq(d.scan_frequency || "auto", true);
+    renderSChannels(d.channels_enabled || ["google"]);
+  }).catch(function() {});
+  // Apply plan gates
+  var planLevel = S_PLAN_ORDER[sPlanName] || 0;
+  if (!sPlanHasAlerts) {
+    document.getElementById("s-alerts-upgrade").style.display = "block";
+    document.getElementById("s-notify-on-change").disabled = true;
+  }
+  var dailyLock = document.getElementById("s-daily-lock");
+  var dailyOpt = document.querySelector('.s-fopt[data-sfreq="daily"]');
+  if (planLevel < S_PLAN_ORDER["growth"]) {
+    if (dailyLock) dailyLock.style.display = "inline-block";
+    if (dailyOpt) dailyOpt.classList.add("s-locked");
+  }
+}
+function selectSThreshold(val, silent) {
+  document.querySelectorAll(".s-topt").forEach(function(el) {
+    el.classList.toggle("selected", el.dataset.sval === val);
+  });
+  if (!silent) sSettings.alert_threshold = val;
+}
+function selectSFreqGated(val) {
+  var planLevel = S_PLAN_ORDER[sPlanName] || 0;
+  if (val === "daily" && planLevel < S_PLAN_ORDER["growth"]) {
+    document.getElementById("s-freq-upgrade").style.display = "block";
+    return;
+  }
+  document.getElementById("s-freq-upgrade").style.display = "none";
+  selectSFreq(val);
+}
+function selectSFreq(val, silent) {
+  document.querySelectorAll(".s-fopt").forEach(function(el) {
+    el.classList.toggle("selected", el.dataset.sfreq === val);
+  });
+  if (!silent) sSettings.scan_frequency = val;
+}
+function renderSChannels(enabled) {
+  var list = document.getElementById("s-channel-list");
+  if (!list) return;
+  var planLevel = S_PLAN_ORDER[sPlanName] || 0;
+  list.innerHTML = "";
+  S_ALL_CHANNELS.forEach(function(ch) {
+    var req = S_PLAN_ORDER[ch.plan] || 0;
+    var unlocked = req <= planLevel;
+    var on = unlocked && enabled.indexOf(ch.id) !== -1;
+    var badge = ch.plan !== "free" ? '<span class="s-plan-badge">' + ch.plan + '+</span>' : "";
+    var row = document.createElement("div");
+    row.className = "s-channel-row";
+    row.innerHTML = '<div class="s-channel-meta"><div class="s-channel-icon">' + ch.icon + '</div><div><div class="s-channel-name">' + ch.name + badge + '</div><div class="s-channel-desc">' + ch.desc + '</div></div></div>' +
+      '<label class="s-switch"><input type="checkbox" data-sch="' + ch.id + '"' + (on ? " checked" : "") + (unlocked ? "" : " disabled") + '><span class="s-slider"></span></label>';
+    list.appendChild(row);
+  });
+}
+function saveNotificationSettings() {
+  api("POST", "/api/settings", {
+    alert_threshold: sSettings.alert_threshold || "high",
+    alert_email: document.getElementById("s-alert-email").value.trim() || null,
+    notify_on_change: document.getElementById("s-notify-on-change").checked,
+  }).then(function(d) {
+    d.success ? showToast("Notification settings saved ✓", "success") : showToast(d.error || "Save failed", "error");
+  }).catch(function() { showToast("Save failed", "error"); });
+}
+function saveScheduleSettings() {
+  var sel = document.querySelector(".s-fopt.selected");
+  api("POST", "/api/settings", { scan_frequency: sel ? sel.dataset.sfreq : "auto" })
+    .then(function(d) {
+      d.success ? showToast("Schedule saved ✓", "success") : showToast(d.error || "Save failed", "error");
+    }).catch(function() { showToast("Save failed", "error"); });
+}
+function saveChannelSettings() {
+  var enabled = [];
+  document.querySelectorAll("#s-channel-list input[data-sch]").forEach(function(inp) {
+    if (inp.checked) enabled.push(inp.dataset.sch);
+  });
+  api("POST", "/api/settings", { channels_enabled: enabled })
+    .then(function(d) {
+      d.success ? showToast("Channel settings saved ✓", "success") : showToast(d.error || "Save failed", "error");
+    }).catch(function() { showToast("Save failed", "error"); });
+}
+function runScanFromSettings() {
+  var btn = document.getElementById("s-scan-btn");
+  var status = document.getElementById("s-scan-status");
+  btn.disabled = true; btn.textContent = "⏳ Scanning…"; status.textContent = "";
+  api("POST", "/api/scan", {}).then(function(d) {
+    btn.disabled = false; btn.textContent = "▶ Run Scan Now";
+    if (d.scan_id) { status.textContent = "✓ Done"; showToast("Scan complete ✓", "success"); loadDashboard(); }
+    else { status.textContent = d.error || "Failed"; }
+  }).catch(function() { btn.disabled = false; btn.textContent = "▶ Run Scan Now"; status.textContent = "Error"; });
 }
 
 // ── Test alert email ──────────────────────────────────────────
