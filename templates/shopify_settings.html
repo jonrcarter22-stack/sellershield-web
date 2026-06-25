@@ -438,8 +438,11 @@ function switchPanel(id) {
 // ── Back ───────────────────────────────────────────────────────
 function goBack(e) {
   e.preventDefault();
-  var url = "/shopify/dashboard?shop=" + encodeURIComponent(SHOP);
-  try { window.top.location.href = url; } catch(err) { window.location.href = url; }
+  if (window.history.length > 1) {
+    window.history.back();
+  } else {
+    window.location.href = "/shopify/dashboard?shop=" + encodeURIComponent(SHOP);
+  }
 }
 
 // ── Toast ──────────────────────────────────────────────────────
@@ -724,8 +727,7 @@ function changePlan(planId) {
   if (!confirm("Switch to the " + planId + " plan?")) return;
   api("POST", "/api/billing/change", { plan: planId }).then(function(d) {
     if (d.confirmation_url) {
-      try { window.top.location.href = d.confirmation_url; }
-      catch(err) { window.location.href = d.confirmation_url; }
+      window.location.href = d.confirmation_url;
     } else if (d.success) {
       showToast("Plan updated ✓");
       setTimeout(function() { window.location.reload(); }, 1000);
