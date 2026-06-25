@@ -1106,15 +1106,15 @@ function saveNotificationSettings() {
     alert_email: document.getElementById("s-alert-email").value.trim() || null,
     notify_on_change: document.getElementById("s-notify-on-change").checked,
   }).then(function(d) {
-    d.success ? showToast("Notification settings saved ✓", "success") : showToast(d.error || "Save failed", "error");
-  }).catch(function() { showToast("Save failed", "error"); });
+    d.success ? toast("Notification settings saved ✓", "success") : toast(d.error || "Save failed", "error");
+  }).catch(function() { toast("Save failed", "error"); });
 }
 function saveScheduleSettings() {
   var sel = document.querySelector(".s-fopt.selected");
   api("POST", "/api/settings", { scan_frequency: sel ? sel.dataset.sfreq : "auto" })
     .then(function(d) {
-      d.success ? showToast("Schedule saved ✓", "success") : showToast(d.error || "Save failed", "error");
-    }).catch(function() { showToast("Save failed", "error"); });
+      d.success ? toast("Schedule saved ✓", "success") : toast(d.error || "Save failed", "error");
+    }).catch(function() { toast("Save failed", "error"); });
 }
 function saveChannelSettings() {
   var enabled = [];
@@ -1123,8 +1123,8 @@ function saveChannelSettings() {
   });
   api("POST", "/api/settings", { channels_enabled: enabled })
     .then(function(d) {
-      d.success ? showToast("Channel settings saved ✓", "success") : showToast(d.error || "Save failed", "error");
-    }).catch(function() { showToast("Save failed", "error"); });
+      d.success ? toast("Channel settings saved ✓", "success") : toast(d.error || "Save failed", "error");
+    }).catch(function() { toast("Save failed", "error"); });
 }
 function runScanFromSettings() {
   var btn = document.getElementById("s-scan-btn");
@@ -1132,7 +1132,7 @@ function runScanFromSettings() {
   btn.disabled = true; btn.textContent = "⏳ Scanning…"; status.textContent = "";
   api("POST", "/api/scan", {}).then(function(d) {
     btn.disabled = false; btn.textContent = "▶ Run Scan Now";
-    if (d.scan_id) { status.textContent = "✓ Done"; showToast("Scan complete ✓", "success"); loadDashboard(); }
+    if (d.scan_id) { status.textContent = "✓ Done"; toast("Scan complete ✓", "success"); loadDashboard(); }
     else { status.textContent = d.error || "Failed"; }
   }).catch(function() { btn.disabled = false; btn.textContent = "▶ Run Scan Now"; status.textContent = "Error"; });
 }
